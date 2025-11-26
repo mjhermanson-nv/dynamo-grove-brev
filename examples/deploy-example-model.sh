@@ -35,10 +35,35 @@ if ! kubectl get crd dynamographdeployments.nvidia.com >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Step 1: Creating DynamoGraphDeployment..."
+# Check for NGC image pull secret (should have been created by install-dynamo.sh)
+echo "Step 1: Checking NGC image pull secret..."
+if ! kubectl get secret ngc-registry-secret -n ${NAMESPACE} >/dev/null 2>&1; then
+    echo "❌ NGC image pull secret not found!"
+    echo ""
+    echo "The secret should have been created by install-dynamo.sh."
+    echo "Please run ./install-dynamo.sh first, or create it manually:"
+    echo ""
+    echo "  kubectl create secret docker-registry ngc-registry-secret \\"
+    echo "    --docker-server=nvcr.io \\"
+    echo "    --docker-username=\$oauthtoken \\"
+    echo "    --docker-password=<your-ngc-api-key> \\"
+    echo "    --docker-email=<your-email> \\"
+    echo "    -n ${NAMESPACE}"
+    echo ""
+    echo "  kubectl patch serviceaccount default -n ${NAMESPACE} \\"
+    echo "    -p '{\"imagePullSecrets\":[{\"name\":\"ngc-registry-secret\"}]}'"
+    echo ""
+    exit 1
+else
+    echo "✓ NGC image pull secret found (created by install-dynamo.sh)"
+fi
+
+echo ""
+echo "Step 2: Creating DynamoGraphDeployment..."
 echo ""
 
 # Create the deployment YAML
+# Note: imagePullSecrets are handled via service account patch above
 cat <<EOF | kubectl apply -f -
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
@@ -89,7 +114,7 @@ EOF
 echo "✓ Deployment created"
 echo ""
 
-echo "Step 2: Waiting for deployment to be ready..."
+echo "Step 3: Waiting for deployment to be ready..."
 echo "This may take a few minutes (model download + startup)..."
 echo ""
 
@@ -113,7 +138,7 @@ kubectl wait --for=condition=ready --timeout=900s pod -l app=${MODEL_NAME}-worke
 }
 
 echo ""
-echo "Step 3: Checking deployment status..."
+echo "Step 4: Checking deployment status..."
 echo ""
 
 kubectl get dynamoGraphDeployment ${MODEL_NAME} -n ${NAMESPACE}
@@ -129,7 +154,7 @@ else
 fi
 
 echo ""
-echo "Step 4: Testing the deployment..."
+echo "Step 5: Testing the deployment..."
 echo ""
 
 # Get the service
@@ -153,7 +178,7 @@ echo "      \"max_tokens\": 100"
 echo "    }'"
 echo ""
 
-echo "Step 5: Monitoring..."
+echo "Step 6: Monitoring..."
 echo ""
 echo "Useful commands:"
 echo "  # Watch pods:"
@@ -169,7 +194,7 @@ echo "  # Check deployment status:"
 echo "  kubectl describe dynamoGraphDeployment ${MODEL_NAME} -n ${NAMESPACE}"
 echo ""
 
-echo "Step 6: Cleanup (when done testing)..."
+echo "Step 7: Cleanup (when done testing)..."
 echo ""
 echo "To delete this deployment:"
 echo "  kubectl delete dynamoGraphDeployment ${MODEL_NAME} -n ${NAMESPACE}"
