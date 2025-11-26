@@ -36,7 +36,7 @@ You'll need:
 
 ## 🚀 Quick Start
 
-### Option 1: Run the Script Directly
+### Step 1: Bootstrap Kubernetes
 
 ```bash
 # Clone or download the repository
@@ -50,16 +50,35 @@ chmod +x oneshot.sh
 sudo ./oneshot.sh
 ```
 
-### Option 2: Run as Root
-
+Or run as root:
 ```bash
 sudo bash oneshot.sh
 ```
 
-The script will:
-- Detect your Brev user automatically
-- Install and configure all components
-- Set up proper permissions
+This will:
+- Install and configure microk8s
+- Set up kubectl, helm, and k9s
+- Configure GPU support
+- Set up storage provisioning
+
+### Step 2: Install Dynamo + Grove
+
+After the bootstrap completes, install Dynamo:
+
+```bash
+# First, authenticate with NGC
+helm registry login nvcr.io
+# Username: $oauthtoken
+# Password: <your-ngc-api-key>
+
+# Then run the Dynamo installer
+./install-dynamo.sh
+```
+
+The Dynamo installer will:
+- Prompt for NGC API key (for image pull secrets)
+- Install Dynamo CRDs and platform
+- Set up Grove components
 - Verify the installation
 
 ## 📖 What Gets Installed
@@ -213,9 +232,23 @@ kubectl get nodes
 ```bash
 # Verify NGC login
 helm registry login nvcr.io
+# Username: $oauthtoken
+# Password: <your-ngc-api-key>
 
 # Check available versions
 # Visit: https://github.com/ai-dynamo/dynamo/releases
+
+# If you see ImagePullBackOff errors, create image pull secret:
+kubectl create secret docker-registry ngc-registry-secret \
+  --docker-server=nvcr.io \
+  --docker-username='$oauthtoken' \
+  --docker-password=<your-ngc-api-key> \
+  --docker-email=<your-email> \
+  -n dynamo-system
+
+# Patch service account to use it:
+kubectl patch serviceaccount default -n dynamo-system \
+  -p '{"imagePullSecrets":[{"name":"ngc-registry-secret"}]}'
 ```
 
 ### GPU Not Detected
@@ -244,8 +277,11 @@ kubectl get pods -n local-path-storage
 # Check operator status
 kubectl get pods -n dynamo-system
 
-# View operator logs
-kubectl logs -n dynamo-system deployment/dynamo-operator
+# View operator logs (note the correct deployment name)
+kubectl logs -n dynamo-system deployment/dynamo-platform-dynamo-operator-controller-manager
+
+# Check all resources
+kubectl get all -n dynamo-system
 ```
 
 ## 💡 Tips
