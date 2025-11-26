@@ -150,12 +150,20 @@ helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-$
     exit 1
 }
 
+# Bitnami moved images to bitnamilegacy repository (as of Aug 2025)
+# Override etcd image to use the legacy repository
+echo "Configuring etcd image to use bitnamilegacy repository..."
 helm install dynamo-platform /tmp/dynamo-platform-${RELEASE_VERSION}.tgz \
     --namespace ${NAMESPACE} \
     --create-namespace \
+    --set global.security.allowInsecureImages=true \
+    --set etcd.image.registry=docker.io \
+    --set etcd.image.repository=bitnamilegacy/etcd \
     --wait \
     --timeout 10m || {
     echo "⚠️  Platform installation had issues, but continuing..."
+    echo "This may be due to Docker Hub rate limiting or image availability."
+    echo "The installation will continue, but some pods may fail to pull images."
 }
 
 rm -f /tmp/dynamo-platform-${RELEASE_VERSION}.tgz
@@ -182,25 +190,89 @@ else
     kubectl get all -n ${NAMESPACE} 2>/dev/null || echo "No resources found in namespace"
 fi
 
-# Check for image pull issues (common with NGC images)
+# Check for image pull issues
 echo ""
 echo "Checking for image pull issues..."
-if kubectl get pods -n ${NAMESPACE} 2>/dev/null | grep -q ImagePullBackOff; then
-    echo "⚠️  Warning: Some pods have ImagePullBackOff errors"
-    echo "This usually means NGC image registry authentication is needed."
+if kubectl get pods -n ${NAMESPACE} 2>/dev/null | grep -qE "(ImagePullBackOff|ErrImagePull)"; then
+    echo "⚠️  Warning: Some pods have image pull errors"
     echo ""
-    echo "To fix, create an image pull secret:"
-    echo "  kubectl create secret docker-registry ngc-registry-secret \\"
-    echo "    --docker-server=nvcr.io \\"
-    echo "    --docker-username=\$oauthtoken \\"
-    echo "    --docker-password=<your-ngc-api-key> \\"
-    echo "    --docker-email=<your-email> \\"
-    echo "    -n ${NAMESPACE}"
-    echo ""
-    echo "Then patch the service accounts to use it:"
-    echo "  kubectl patch serviceaccount default -n ${NAMESPACE} -p '{\"imagePullSecrets\":[{\"name\":\"ngc-registry-secret\"}]}'"
-    echo ""
+    
+    # Check for Docker Hub images (etcd, etc.)
+    DOCKERHUB_ISSUES=$(kubectl get pods -n ${NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[*].state.waiting.reason}{"\t"}{.status.containerStatuses[*].state.waiting.message}{"\n"}{end}' 2>/dev/null | grep -E "(ImagePullBackOff|ErrImagePull)" || true)
+    
+    if echo "$DOCKERHUB_ISSUES" | grep -q "docker.io"; then
+        echo "🔍 Docker Hub image pull issues detected (common with etcd, nats, etc.)"
+        echo ""
+        echo "This is often caused by:"
+        echo "  1. Docker Hub rate limiting (anonymous pulls)"
+        echo "  2. Network connectivity issues"
+        echo "  3. Image tag not found"
+        echo ""
+        echo "Solutions:"
+        echo ""
+        echo "Option 1: Create Docker Hub pull secret (if you have an account):"
+        echo "  kubectl create secret docker-registry dockerhub-secret \\"
+        echo "    --docker-server=docker.io \\"
+        echo "    --docker-username=<your-dockerhub-username> \\"
+        echo "    --docker-password=<your-dockerhub-token> \\"
+        echo "    --docker-email=<your-email> \\"
+        echo "    -n ${NAMESPACE}"
+        echo ""
+        echo "Option 2: Update to use bitnamilegacy repository:"
+        echo "  # Bitnami moved images to bitnamilegacy (as of Aug 2025)"
+        echo "  # Upgrade the Helm release with the correct image:"
+        echo "  helm upgrade dynamo-platform /tmp/dynamo-platform-${RELEASE_VERSION}.tgz \\"
+        echo "    --namespace ${NAMESPACE} \\"
+        echo "    --set global.security.allowInsecureImages=true \\"
+        echo "    --set etcd.image.registry=docker.io \\"
+        echo "    --set etcd.image.repository=bitnamilegacy/etcd"
+        echo ""
+        echo "Option 3: Pull image manually using containerd (microk8s):"
+        echo "  # Check which image is failing:"
+        echo "  kubectl describe pod <pod-name> -n ${NAMESPACE} | grep Image"
+        echo ""
+        echo "  # Try pulling from bitnamilegacy:"
+        echo "  sudo microk8s ctr image pull docker.io/bitnamilegacy/etcd:3.5.18-debian-12-r5"
+        echo "  # Or using containerd directly:"
+        echo "  sudo ctr -n k8s.io images pull docker.io/bitnamilegacy/etcd:3.5.18-debian-12-r5"
+        echo ""
+        echo "  # Then delete the pod to retry:"
+        echo "  kubectl delete pod dynamo-platform-etcd-0 -n ${NAMESPACE}"
+        echo ""
+        echo "Option 3: Wait and retry (Docker Hub rate limits reset):"
+        echo "  kubectl delete pod <pod-name> -n ${NAMESPACE}"
+        echo "  # Wait a few minutes, then check again"
+        echo ""
+        echo "Option 4: Check if image tag exists:"
+        echo "  # Visit: https://hub.docker.com/r/bitnami/etcd/tags"
+        echo "  # The Helm chart may need updating if tag doesn't exist"
+        echo ""
+    fi
+    
+    # Check for NGC images
+    if echo "$DOCKERHUB_ISSUES" | grep -q "nvcr.io"; then
+        echo "🔍 NGC image pull issues detected"
+        echo ""
+        echo "This usually means NGC image registry authentication is needed."
+        echo ""
+        echo "To fix, create an image pull secret:"
+        echo "  kubectl create secret docker-registry ngc-registry-secret \\"
+        echo "    --docker-server=nvcr.io \\"
+        echo "    --docker-username=\$oauthtoken \\"
+        echo "    --docker-password=<your-ngc-api-key> \\"
+        echo "    --docker-email=<your-email> \\"
+        echo "    -n ${NAMESPACE}"
+        echo ""
+        echo "Then patch the service accounts to use it:"
+        echo "  kubectl patch serviceaccount default -n ${NAMESPACE} -p '{\"imagePullSecrets\":[{\"name\":\"ngc-registry-secret\"}]}'"
+        echo ""
+    fi
+    
+    echo "Affected pods:"
     kubectl get pods -n ${NAMESPACE} | grep -E "(ImagePullBackOff|ErrImagePull)" || true
+    echo ""
+    echo "To see detailed error:"
+    echo "  kubectl describe pod <pod-name> -n ${NAMESPACE}"
 fi
 
 # Step 3: Install Grove (for multinode support and advanced features)
