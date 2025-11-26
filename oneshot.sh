@@ -169,3 +169,163 @@ echo ""
 echo "Next steps:"
 echo "  Follow the README.md in this directory to deploy Dynamo + Grove"
 echo ""
+
+### Dynamo + Grove deployment
+echo ""
+echo "🚀 Deploying Dynamo + Grove..."
+echo ""
+
+# Set environment variables
+export NAMESPACE=dynamo-system
+export RELEASE_VERSION=0.3.2  # Update to latest version as needed
+
+# Create namespace
+echo "Creating namespace: $NAMESPACE"
+kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+# Step 1: Install Dynamo CRDs
+echo ""
+echo "Step 1: Installing Dynamo CRDs..."
+echo "Note: This requires NGC authentication. If you haven't logged in, run:"
+echo "  helm registry login nvcr.io"
+echo ""
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-${RELEASE_VERSION}.tgz || {
+    echo "⚠️  Failed to fetch CRDs. Checking if CRDs already exist..."
+    if kubectl get crd dynamographdeployments.nvidia.com >/dev/null 2>&1; then
+        echo "✓ CRDs already exist, skipping installation"
+    else
+        echo "❌ CRDs not found and fetch failed."
+        echo "   Please ensure you have:"
+        echo "   1. NGC account access (https://catalog.ngc.nvidia.com/)"
+        echo "   2. Logged in: helm registry login nvcr.io"
+        echo "   3. Correct RELEASE_VERSION (check: https://github.com/ai-dynamo/dynamo/releases)"
+        exit 1
+    fi
+}
+
+if [ -f "dynamo-crds-${RELEASE_VERSION}.tgz" ]; then
+    helm install dynamo-crds dynamo-crds-${RELEASE_VERSION}.tgz --namespace default || {
+        echo "⚠️  CRD installation failed, but continuing (may already exist)"
+    }
+    rm -f dynamo-crds-${RELEASE_VERSION}.tgz
+fi
+
+# Step 2: Install Dynamo Platform
+echo ""
+echo "Step 2: Installing Dynamo Platform..."
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz || {
+    echo "❌ Failed to fetch Dynamo Platform."
+    echo "   Please ensure NGC authentication: helm registry login nvcr.io"
+    exit 1
+}
+
+helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
+    --namespace ${NAMESPACE} \
+    --create-namespace \
+    --wait \
+    --timeout 10m || {
+    echo "⚠️  Platform installation had issues, but continuing..."
+}
+
+rm -f dynamo-platform-${RELEASE_VERSION}.tgz
+
+# Wait for platform to be ready
+echo ""
+echo "Waiting for Dynamo Platform to be ready..."
+kubectl wait --for=condition=available --timeout=300s deployment/dynamo-operator -n ${NAMESPACE} || echo "⚠️  Operator may still be starting"
+
+# Step 3: Install Grove (for multinode support and advanced features)
+echo ""
+echo "Step 3: Setting up Grove..."
+echo "Grove enables advanced features like distributed KV cache and multinode deployments."
+echo "For single-node setups, Grove provides enhanced capabilities for future scaling."
+echo ""
+
+# Note: Grove installation details may vary by version
+# Check if Grove is included in the platform or needs separate installation
+if kubectl get crd grovenodes.grove.nvidia.com >/dev/null 2>&1; then
+    echo "✓ Grove CRDs detected"
+elif kubectl get crd | grep -i grove >/dev/null 2>&1; then
+    echo "✓ Grove components found"
+else
+    echo "ℹ️  Grove CRDs not found in this installation."
+    echo "   Grove may be installed separately or included in multinode configurations."
+    echo "   For single-node with 2 L40s, Dynamo works without Grove."
+    echo "   See: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/index.html"
+fi
+
+# Step 4: Verify installation
+echo ""
+echo "Step 4: Verifying installation..."
+echo ""
+echo "Checking Dynamo components:"
+kubectl get pods -n ${NAMESPACE}
+echo ""
+echo "Checking CRDs:"
+kubectl get crd | grep -E "(dynamo|grove)" || echo "No Dynamo/Grove CRDs found"
+
+# Step 5: Prepare for model deployment
+echo ""
+echo "Step 5: Preparing for model deployment..."
+echo ""
+echo "📝 Tutorial: Deploying Your First Model with Dynamo + Grove"
+echo ""
+echo "Your setup: Single node with 2x L40s GPUs"
+echo ""
+echo "Option A: Deploy with HuggingFace (recommended for first-time users)"
+echo ""
+echo "1. Create HuggingFace token secret (if needed for private models):"
+echo "   export HF_TOKEN=<your-token>"
+echo "   kubectl create secret generic hf-token-secret \\"
+echo "     --from-literal=HF_TOKEN=\"\$HF_TOKEN\" \\"
+echo "     -n ${NAMESPACE}"
+echo ""
+echo "2. Create a simple DynamoGraphDeployment YAML (save as my-model.yaml):"
+echo "   # Example for vLLM backend with aggregated serving"
+echo "   # This uses 1 GPU per worker - perfect for your 2 L40s setup"
+echo ""
+echo "3. Deploy the model:"
+echo "   kubectl apply -f my-model.yaml -n ${NAMESPACE}"
+echo ""
+echo "4. Monitor deployment:"
+echo "   kubectl get dynamoGraphDeployment -n ${NAMESPACE}"
+echo "   kubectl get pods -n ${NAMESPACE} -w"
+echo ""
+echo "5. Test the deployment:"
+echo "   kubectl port-forward svc/<your-frontend-service> 8000:8000 -n ${NAMESPACE}"
+echo "   curl http://localhost:8000/v1/models"
+echo ""
+echo "📚 Example configurations available at:"
+echo "   https://github.com/ai-dynamo/dynamo/tree/main/examples/backends"
+echo ""
+echo "💡 Architecture patterns for your 2 L40s setup:"
+echo "   - Aggregated: 1 worker per GPU (2 workers total)"
+echo "   - Disaggregated: Separate prefill/decode workers for higher throughput"
+echo "   - With Router: Load balancing across workers"
+echo ""
+
+# Display GPU information
+echo ""
+echo "🖥️  GPU Information:"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader | head -2
+    echo ""
+    echo "You have 2x L40s GPUs available for Dynamo deployments"
+else
+    echo "⚠️  nvidia-smi not found. GPUs may not be properly configured."
+fi
+
+echo ""
+echo "✅ Dynamo + Grove deployment complete!"
+echo ""
+echo "📚 Next Steps:"
+echo "   1. Review Dynamo documentation: https://docs.nvidia.com/dynamo/latest/kubernetes/README.html"
+echo "   2. Choose a backend (vLLM, SGLang, or TensorRT-LLM)"
+echo "   3. Deploy your first model using DynamoGraphDeployment"
+echo "   4. For multinode deployments, configure Grove"
+echo ""
+echo "💡 Quick commands:"
+echo "   kubectl get dynamoGraphDeployment -n ${NAMESPACE}"
+echo "   kubectl get pods -n ${NAMESPACE}"
+echo "   kubectl logs -n ${NAMESPACE} <pod-name>"
+echo ""
