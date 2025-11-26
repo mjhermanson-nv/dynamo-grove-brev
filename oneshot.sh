@@ -51,7 +51,7 @@ sudo microk8s status --wait-ready
 # Enable essential addons
 echo "Enabling addons..."
 sudo microk8s enable dns
-sudo microk8s enable gpu  # NVIDIA GPU operator (Brev has NVIDIA drivers)
+sudo microk8s enable nvidia  # NVIDIA GPU operator (Brev has NVIDIA drivers)
 
 # Export kubeconfig so kubectl works without group membership
 echo "Configuring kubectl access..."
@@ -85,9 +85,10 @@ sudo snap unalias kubectl 2>/dev/null || true
 
 # Install standalone kubectl (works without group membership!)
 echo "Installing standalone kubectl..."
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-chmod +x kubectl
-sudo mv kubectl /usr/local/bin/kubectl
+KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+curl -L "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /tmp/kubectl
+chmod +x /tmp/kubectl
+sudo mv /tmp/kubectl /usr/local/bin/kubectl
 echo "✓ kubectl installed to /usr/local/bin/kubectl"
 
 # Install standalone helm (works without group membership!)
@@ -97,11 +98,13 @@ echo "✓ helm installed to /usr/local/bin/helm"
 
 # Install k9s for terminal UI
 echo "Installing k9s..."
-wget -q https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
-tar -xzf k9s_Linux_amd64.tar.gz
-sudo chmod +x k9s
-sudo mv k9s /usr/local/bin/
-rm k9s_Linux_amd64.tar.gz LICENSE README.md 2>/dev/null || true
+cd /tmp
+wget -q https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz -O /tmp/k9s_Linux_amd64.tar.gz
+tar -xzf /tmp/k9s_Linux_amd64.tar.gz -C /tmp
+sudo chmod +x /tmp/k9s
+sudo mv /tmp/k9s /usr/local/bin/
+rm -f /tmp/k9s_Linux_amd64.tar.gz /tmp/LICENSE /tmp/README.md 2>/dev/null || true
+cd - > /dev/null
 
 # Install local-path-provisioner for PersistentVolumeClaims
 echo "Installing local-path storage provisioner..."
