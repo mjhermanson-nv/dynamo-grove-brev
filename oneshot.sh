@@ -142,6 +142,12 @@ cat <<EOF >/tmp/kube-prometheus-stack-values.yaml
 grafana:
   enabled: true
   adminPassword: "${GRAFANA_ADMIN_PASSWORD}"
+  grafana.ini:
+    auth:
+      disable_login_form: true
+    auth.anonymous:
+      enabled: true
+      org_role: Editor
   service:
     type: NodePort
     nodePort: 30080
@@ -457,7 +463,8 @@ echo "  - No 'newgrp' or logout required!"
 echo ""
 echo "Grafana access:"
 echo "  URL: http://<node-ip>:30080"
-echo "  User: admin"
+echo "  Login: disabled (anonymous Editor access enabled)"
+echo "  User: admin (if you re-enable login)"
 echo "  Password: $GRAFANA_ADMIN_PASSWORD"
 echo "  Hint: get node IPs with 'kubectl get nodes -o wide'"
 echo ""
