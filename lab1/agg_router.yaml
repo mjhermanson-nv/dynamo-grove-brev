@@ -16,7 +16,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post2
       envs:
         - name: DYN_ROUTER_MODE
           value: kv
@@ -38,7 +38,7 @@ spec:
             path: /data/huggingface-cache  # Update with actual cache path
             type: DirectoryOrCreate
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.6.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.0.post2
           securityContext:
             capabilities:
               add:
@@ -53,3 +53,20 @@ spec:
           args:
             - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct
 
+---
+# NodePort Service to expose the frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-frontend-nodeport
+spec:
+  type: NodePort
+  selector:
+    nvidia.com/dynamo-component: Frontend
+    nvidia.com/dynamo-graph-deployment-name: vllm-agg-router
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30100
+    protocol: TCP
+    name: http

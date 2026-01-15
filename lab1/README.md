@@ -1,11 +1,11 @@
 # Lab 1: Introduction and Kubernetes-Based Deployment
 
-This lab introduces Dynamo and guides you through setting up a namespace-scoped Kubernetes deployment on a shared cluster.
+This lab introduces Dynamo and guides you through setting up a Kubernetes deployment on a single-node cluster.
 
 ## Objectives
 
-- Set up your personal namespace in the shared Kubernetes cluster
-- Deploy namespace-scoped Dynamo platform (operator, etcd, NATS)
+- Set up your namespace in the Kubernetes cluster
+- Deploy Dynamo platform (operator, etcd, NATS)
 - Deploy your first model using aggregated serving with vLLM
 - Test with OpenAI-compatible API
 - Benchmark the deployment using AI-Perf
@@ -18,9 +18,10 @@ This lab introduces Dynamo and guides you through setting up a namespace-scoped 
 
 ## Prerequisites
 
-- Kubernetes cluster access (kubeconfig provided by instructor)
+- Single-node Kubernetes cluster (MicroK8s recommended)
 - `kubectl` installed (version 1.24+)
 - `helm` 3.x installed
+- NGC API key from [ngc.nvidia.com](https://ngc.nvidia.com/) (for container image access)
 - HuggingFace token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
 ## Getting Started
@@ -40,7 +41,6 @@ This lab introduces Dynamo and guides you through setting up a namespace-scoped 
 ## Expected Outcomes
 
 By the end of this lab, you will have:
-- Your own namespace with a namespace-scoped Dynamo operator
 - A working Dynamo deployment serving a model via aggregated serving
 - Understanding of Kubernetes-based aggregated serving architecture
 - Experience with DynamoGraphDeployment CRD
@@ -54,10 +54,10 @@ By the end of this lab, you will have:
 
 ## Key Concepts
 
-- **Namespace-scoped operator**: Dynamo operator that only manages resources in your namespace (safe for shared clusters)
 - **Aggregated serving**: All model layers on same GPU(s), simpler topology
 - **KV-cache routing**: Intelligent load balancing based on KV cache state
 - **DynamoGraphDeployment**: Kubernetes Custom Resource for defining inference deployments
+- **Single-node cluster**: All Kubernetes components and workloads run on one machine
 
 ## Next Lab
 

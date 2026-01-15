@@ -3,8 +3,8 @@
 ## Overview
 
 In this lab, you will:
-- Set up your personal namespace in the shared Kubernetes cluster
-- Deploy Dynamo using namespace-scoped operator on Kubernetes
+- Set up your namespace in the Kubernetes cluster
+- Deploy Dynamo platform on Kubernetes
 - Configure a backend engine using aggregated serving
 - Test the deployment with OpenAI-compatible API
 - Benchmark the deployment using AI-Perf
@@ -16,16 +16,17 @@ In this lab, you will:
 ## Section 1: Environment Setup
 
 ### Objectives
-- Verify Kubernetes access (shared cluster)
-- Create your personal namespace
-- Install Dynamo dependencies in your namespace
+- Verify Kubernetes access
+- Create your namespace
+- Install Dynamo dependencies
 - Set up prerequisites (kubectl, helm)
 
 ### Prerequisites
 Before starting, ensure you have:
-- ✅ Kubernetes cluster access (kubeconfig provided by instructor)
-- ✅ `kubectl` installed (version 1.24+) or `kubectl`
+- ✅ Single-node Kubernetes cluster (MicroK8s recommended)
+- ✅ `kubectl` installed (version 1.24+)
 - ✅ `helm` 3.x installed
+- ✅ NGC API key from [ngc.nvidia.com](https://ngc.nvidia.com/) (for container image access)
 - ✅ HuggingFace token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
 ### Step 2: Set Configuration Variables
@@ -37,38 +38,29 @@ Set your configuration variables. **Replace the values below with your own:**
 ```python
 import os
 
-# Load environment variables from workshop-env.sh
-# These are pre-configured based on your UID to prevent port conflicts
-USER_JUPYTER_PORT = os.environ.get('USER_JUPYTER_PORT', '8888')
-USER_FRONTEND_PORT = os.environ.get('USER_FRONTEND_PORT', '10000')
-USER_FRONTEND2_PORT = os.environ.get('USER_FRONTEND2_PORT', '11000')
-USER_PROMETHEUS_PORT = os.environ.get('USER_PROMETHEUS_PORT', '19090')
-USER_GRAFANA_PORT = os.environ.get('USER_GRAFANA_PORT', '13000')
-NAMESPACE = os.environ.get('NAMESPACE', f"dynamo-{os.environ.get('USER', 'unknown')}")
-
-# Set workshop configuration
-os.environ['RELEASE_VERSION'] = '0.6.1'
-os.environ['NAMESPACE'] = NAMESPACE
+# Set lab configuration
+os.environ['RELEASE_VERSION'] = '0.7.1'
+os.environ['NAMESPACE'] = 'dynamo-lab1'
 os.environ['HF_TOKEN'] = ''  # Replace with your HuggingFace token
-os.environ['CACHE_PATH'] = '/data/huggingface-cache'  # Shared cache path
+os.environ['CACHE_PATH'] = '/data/huggingface-cache'  # Local cache path
+
+NAMESPACE = os.environ['NAMESPACE']
+FRONTEND_PORT = '10000'
+GRAFANA_PORT = '30080'  # NodePort from monitoring stack
 
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 print("🎓 Lab 1: Environment Configuration")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print(f"  User:             {os.environ.get('USER')}")
 print(f"  Release Version:  {os.environ['RELEASE_VERSION']}")
 print(f"  Namespace:        {NAMESPACE}")
 print(f"  Cache Path:       {os.environ['CACHE_PATH']}")
 print("")
-print("📌 Your Assigned Ports:")
-print(f"  Frontend (Lab 1): {USER_FRONTEND_PORT}")
-print(f"  Prometheus:       {USER_PROMETHEUS_PORT}")
-print(f"  Grafana:          {USER_GRAFANA_PORT}")
+print("📌 Access Ports:")
+print(f"  Frontend API:     localhost:{FRONTEND_PORT} (via port-forward)")
+print(f"  Grafana:          http://<node-ip>:{GRAFANA_PORT}")
 print("")
-print("💡 Use localhost:{port} in your browser (via SSH tunnel)")
-print("   - Frontend API:   localhost:10000")
-print("   - Prometheus:     localhost:19090")
-print("   - Grafana:        localhost:13000")
+print("💡 Use port-forward to access the frontend:")
+print(f"   kubectl port-forward -n {NAMESPACE} deployment/vllm-agg-router-frontend {FRONTEND_PORT}:8000")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 ```
 
@@ -88,24 +80,107 @@ kubectl cluster-info
 kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu
 ```
 
-### Step 4: Create Your Personal Namespace
+### Step 4: Set Up NGC Authentication
+
+To access NVIDIA's Dynamo container images, you need to authenticate with NGC (NVIDIA GPU Cloud).
+
+#### Get Your NGC API Key
+
+1. Go to [NGC](https://ngc.nvidia.com/)
+2. Sign in or create an account
+3. Click on your profile in the top right corner
+4. Select **"Setup"** → **"Generate API Key"**
+5. Copy your API key (it will only be shown once!)
+
+#### Get and Save Your NGC API Key
+
+
+
+```python
+import os
+import getpass
+
+# Get NGC API key from user
+print("Enter your NGC API Key from https://ngc.nvidia.com/")
+print("(Go to Profile > Setup > Generate API Key)")
+print("")
+NGC_API_KEY = getpass.getpass("NGC API Key: ")
+
+# Save it for later use (creating pull secrets)
+os.environ['NGC_API_KEY'] = NGC_API_KEY
+
+print("")
+print("✓ NGC API key saved")
+print("  You can now use it to login and create pull secrets")
+```
+
+#### Login to NGC Container Registry
 
 
 
 ```bash
 %%bash
-# Create your personal namespace
+# Login to NGC container registry
+echo $NGC_API_KEY | helm registry login nvcr.io --username '$oauthtoken' --password-stdin
+
+echo ""
+echo "✓ NGC authentication complete"
+echo "  You can now pull Dynamo container images"
+```
+
+### Step 5: Create Your Namespace
+
+
+
+```bash
+%%bash
+# Create your namespace
 kubectl create namespace $NAMESPACE
 
 # Verify namespace was created
 kubectl get namespace $NAMESPACE
 ```
 
-## Section 2: Install Dynamo Platform (Namespace-Scoped)
+### Step 6: Create NGC Pull Secret
+
+Create a Kubernetes secret so that pods can pull images from NGC.
+
+
+
+```bash
+%%bash
+# Create NGC image pull secret
+kubectl create secret docker-registry ngc-secret \
+  --docker-server=nvcr.io \
+  --docker-username='$oauthtoken' \
+  --docker-password=$NGC_API_KEY \
+  --namespace $NAMESPACE
+
+# Verify secret was created
+kubectl get secret ngc-secret -n $NAMESPACE
+echo "✓ NGC pull secret created in namespace: $NAMESPACE"
+```
+
+### Step 7: Create HuggingFace Token Secret
+
+
+
+```bash
+%%bash
+# Create HuggingFace token secret
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN="$HF_TOKEN" \
+  --namespace $NAMESPACE
+
+# Verify secret was created
+kubectl get secret hf-token-secret -n $NAMESPACE
+echo "✓ HuggingFace token secret created"
+```
+
+## Section 2: Install Dynamo Platform
 
 ### Objectives
-- Understand namespace-scoped operator deployment for shared clusters
-- Install Dynamo CRDs (if not already installed cluster-wide)
+- Install Dynamo CRDs (Custom Resource Definitions)
 - Install Dynamo platform (etcd, NATS, operator) in your namespace
 - Verify platform components are running
 
@@ -113,21 +188,14 @@ kubectl get namespace $NAMESPACE
 ```
 Client → Frontend → Router → Worker(s) with Backend Engine
                         ↓
-            etcd + NATS (namespace-scoped)
+                 etcd + NATS
                         ↓
-            Dynamo Operator (namespace-scoped)
+                Dynamo Operator
 ```
 
-### Important: Shared Cluster Configuration
+### Step 1: Install Dynamo CRDs
 
-Since we're using a **shared Kubernetes cluster**, each participant will:
-- Create their own namespace (e.g., `dynamo-<yourname>`)
-- Install a **namespace-scoped Dynamo operator** that only manages resources in your namespace
-- The CRDs are cluster-wide and should already be installed (check first)
-
-### Step 1: Check if Dynamo CRDs Are Installed
-
-**Note:** CRDs are cluster-wide resources and only need to be installed **once per cluster**. If already installed, skip to Step 2.
+CRDs are cluster-wide resources that define the custom resources used by Dynamo.
 
 
 
@@ -139,31 +207,19 @@ if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
     echo "✓ CRDs already installed"
     kubectl get crd | grep nvidia.com
 else
-    echo "⚠️  CRDs not found. Ask instructor to install them, or proceed with Step 1b"
+    echo "Installing Dynamo CRDs..."
+    helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
+    helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
+    
+    echo ""
+    echo "Verifying CRD installation:"
+    kubectl get crd | grep nvidia.com
 fi
 ```
 
-### Step 1b: Install CRDs (Optional - Instructor May Do This)
+### Step 2: Install Dynamo Platform
 
-**Skip this step if CRDs are already installed.** If needed, run:
-
-
-
-```bash
-%%bash
-# Install Dynamo CRDs (only if not already installed)
-echo "Installing Dynamo CRDs..."
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
-helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
-
-echo ""
-echo "Verifying CRD installation:"
-kubectl get crd | grep nvidia.com
-```
-
-### Step 2: Install Namespace-Scoped Dynamo Platform
-
-This installs ETCD, NATS, and the Dynamo Operator Controller in your namespace with namespace restriction enabled.
+This installs ETCD, NATS, and the Dynamo Operator Controller in your namespace.
 
 
 
@@ -172,11 +228,10 @@ This installs ETCD, NATS, and the Dynamo Operator Controller in your namespace w
 # Download platform chart
 helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-$RELEASE_VERSION.tgz
 
-# Install with namespace restriction enabled (IMPORTANT for shared clusters!)
+# Install Dynamo platform
 echo "Installing Dynamo platform in namespace: $NAMESPACE"
 helm install dynamo-platform dynamo-platform-$RELEASE_VERSION.tgz \
-  --namespace $NAMESPACE \
-  --set dynamo-operator.namespaceRestriction.enabled=true
+  --namespace $NAMESPACE
 
 echo ""
 echo "Platform installation initiated. Waiting for pods to be ready..."
@@ -191,22 +246,6 @@ Re-run the following cell until all pods report as "Running"
 ```bash
 %%bash
 kubectl get pods -n $NAMESPACE
-```
-
-### Step 4: Create HuggingFace Token Secret
-
-
-
-```bash
-%%bash
-# Create HuggingFace token secret
-kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="$HF_TOKEN" \
-  --namespace $NAMESPACE
-
-# Verify secret was created
-kubectl get secret hf-token-secret -n $NAMESPACE
-echo "✓ HuggingFace token secret created"
 ```
 
 ## Section 3: Deploy Your First Model with Aggregated Serving
@@ -313,31 +352,33 @@ fi
 ## Section 4: Testing and Validation
 
 ### Objectives
-- Expose the service locally using port forwarding
+- Access the service via NodePort
 - Send test requests to the deployment
 - Verify OpenAI API compatibility
 - Test streaming and non-streaming responses
 
 ### Testing Strategy
 Once your deployment is running (`1/1 Ready`), you'll:
-1. Forward the frontend service port to localhost
-2. Test with curl commands
-3. Verify response format and functionality
+1. Get the node IP address
+2. Access the service on NodePort 30100
+3. Test with curl commands
+4. Verify response format and functionality
 
-### Step 1: Set Up Port Forwarding
+### Step 1: Get Node IP and Service URL
 
-Forward the service port to localhost (run in background):
+The frontend is exposed as a NodePort service on port 30100:
 
 
 
 ```bash
-%%bash --bg
-# Forward the service port (run in background)
-kubectl port-forward deployment/vllm-agg-router-frontend $USER_FRONTEND_PORT:8000 -n $NAMESPACE &
-
-echo "✓ Port forward started on localhost:${USER_FRONTEND_PORT}"
-echo "  (To stop: use 'pkill -f port-forward' or press Ctrl+C)"
-sleep 5  # Give it time to start
+%%bash
+# Get the node IP
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+echo "Node IP: $NODE_IP"
+echo ""
+echo "Frontend URL: http://$NODE_IP:30100"
+echo ""
+echo "✓ Access the frontend at: http://$NODE_IP:30100"
 ```
 
 ### Step 2: Test the `/v1/models` Endpoint
@@ -346,22 +387,28 @@ sleep 5  # Give it time to start
 
 ```bash
 %%bash
-curl http://localhost:${USER_FRONTEND_PORT}/v1/models
+# Get node IP for testing
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+curl http://$NODE_IP:30100/v1/models
 ```
 
 ### Step 3: Simple Non-Streaming Chat Completion
 
 
 
-```python
-%%python
-!curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+```bash
+%%bash
+# Get node IP for testing
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+curl http://$NODE_IP:30100/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{ \
-    "model": "Qwen/Qwen2.5-1.5B-Instruct",\
-    "messages": [{"role": "user", "content": "Hello! How are you?"}], \
-    "stream": false,\
-    "max_tokens": 50 \
+  -d '{ 
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Hello! How are you?"}], 
+    "stream": false,
+    "max_tokens": 50 
   }'
 ```
 
@@ -369,15 +416,18 @@ curl http://localhost:${USER_FRONTEND_PORT}/v1/models
 
 
 
-```python
-%%python
-!curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+```bash
+%%bash
+# Get node IP for testing
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+curl http://$NODE_IP:30100/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{ \
-    "model": "Qwen/Qwen2.5-1.5B-Instruct", \
-    "messages": [{"role": "user", "content": "Write a short poem about AI"}], \
-    "stream": true, \
-    "max_tokens": 100 \
+  -d '{ 
+    "model": "Qwen/Qwen2.5-1.5B-Instruct", 
+    "messages": [{"role": "user", "content": "Write a short poem about AI"}], 
+    "stream": true, 
+    "max_tokens": 100 
   }'
 ```
 
@@ -385,17 +435,20 @@ curl http://localhost:${USER_FRONTEND_PORT}/v1/models
 
 
 
-```python
-%%python
-!curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+```bash
+%%bash
+# Get node IP for testing
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+curl http://$NODE_IP:30100/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{ \
-    "model": "Qwen/Qwen2.5-1.5B-Instruct", \
-    "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}], \
-    "stream": false, \
-    "temperature": 0.7, \
-    "max_tokens": 100, \
-    "top_p": 0.9 \
+  -d '{ 
+    "model": "Qwen/Qwen2.5-1.5B-Instruct", 
+    "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}], 
+    "stream": false, 
+    "temperature": 0.7, 
+    "max_tokens": 100, 
+    "top_p": 0.9 
   }'
 ```
 
@@ -436,10 +489,13 @@ print("✓ AI-Perf installed")
 
 ```bash
 %%bash
+# Get node IP for benchmarking
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
 # Run a simple benchmark with low concurrency
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://$NODE_IP:30100 \
   --endpoint-type chat \
   --streaming \
   --concurrency 1 \
@@ -455,10 +511,13 @@ echo "✓ Baseline benchmark complete"
 
 ```bash
 %%bash
+# Get node IP for benchmarking
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
 # Test with higher concurrency to stress test
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://$NODE_IP:30100 \
   --endpoint-type chat \
   --streaming \
   --concurrency 4 \
@@ -474,10 +533,13 @@ echo "✓ High concurrency benchmark complete"
 
 ```bash
 %%bash
+# Get node IP for benchmarking
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
 # Test with request rate instead of concurrency
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://$NODE_IP:30100 \
   --endpoint-type chat \
   --streaming \
   --request-rate 10 \
@@ -546,10 +608,13 @@ Test with your scaled deployment:
 
 ```bash
 %%bash
+# Get node IP for benchmarking
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
 # Run benchmark against scaled deployment
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://$NODE_IP:30100 \
   --endpoint-type chat \
   --streaming \
   --concurrency 8 \
@@ -643,7 +708,7 @@ kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
 ## Summary
 
 ### What You Learned
-- ✅ How to set up a namespace-scoped Dynamo deployment on Kubernetes
+- ✅ How to set up a Dynamo deployment on Kubernetes
 - ✅ Kubernetes-based aggregated deployment architecture
 - ✅ Creating and managing DynamoGraphDeployment resources
 - ✅ Backend engine deployment (vLLM)
@@ -651,11 +716,11 @@ kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
 - ✅ Performance benchmarking with AI-Perf
 
 ### Key Takeaways
-- Namespace-scoped operators enable safe multi-tenant deployments
 - Aggregated serving is simpler to deploy and suitable for single-node models
 - KV-cache routing provides intelligent load balancing across replicas
 - DynamoGraphDeployment CRD simplifies complex inference deployments
 - AI-Perf provides comprehensive performance insights
+- Single-node Kubernetes clusters are ideal for development and learning
 
 ### Next Steps
 - **(Optional)** Complete the **Monitoring Extension** (`lab1-monitoring.md`) to set up Prometheus and Grafana for observability
@@ -686,17 +751,43 @@ alias kubectl='kubectl'
 kubectl version --client
 kubectl cluster-info
 
-# Set your configuration (customize with your name!)
-export NAMESPACE="dynamo-yourname"  # Replace 'yourname' with your actual name
-export RELEASE_VERSION="0.5.0"     # Dynamo version
-export HF_TOKEN="your_hf_token"    # Your HuggingFace token
-export CACHE_PATH="/data/huggingface-cache"  # Shared cache path (ask instructor)
+# Set your configuration
+export NAMESPACE="dynamo-lab1"
+export RELEASE_VERSION="0.7.1"     # Dynamo version
+export CACHE_PATH="/data/huggingface-cache"  # Local cache path
 
-# Create your personal namespace
+# HuggingFace Token - Required for model downloads
+# Get your token from https://huggingface.co/settings/tokens
+export HF_TOKEN="your_hf_token"    # Replace with your HuggingFace token
+
+# NGC Authentication - Get and save NGC API key
+export NGC_API_KEY="your_ngc_api_key"  # Replace with your actual NGC API key from https://ngc.nvidia.com/
+
+# Login to NVIDIA Container Registry
+# Username: $oauthtoken (literal string)
+# Password: your NGC API key
+echo $NGC_API_KEY | helm registry login nvcr.io --username '$oauthtoken' --password-stdin
+
+# Create your namespace
 kubectl create namespace ${NAMESPACE}
 
 # Verify namespace was created
 kubectl get namespace ${NAMESPACE}
+
+# Create NGC pull secret in the namespace
+kubectl create secret docker-registry ngc-secret \
+  --docker-server=nvcr.io \
+  --docker-username='$oauthtoken' \
+  --docker-password=$NGC_API_KEY \
+  --namespace ${NAMESPACE}
+
+# Verify NGC secret was created
+kubectl get secret ngc-secret -n ${NAMESPACE}
+
+# Create HuggingFace token secret
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN="${HF_TOKEN}" \
+  --namespace ${NAMESPACE}
 
 # Check GPU nodes are available (optional)
 kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu
@@ -721,11 +812,9 @@ fi
 # Step 2: Download Dynamo platform helm chart
 helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz
 
-# Step 3: Install namespace-scoped Dynamo platform
-# IMPORTANT: --set dynamo-operator.namespaceRestriction.enabled=true restricts operator to this namespace
+# Step 3: Install Dynamo platform (cluster-wide by default - recommended)
 helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
-  --namespace ${NAMESPACE} \
-  --set dynamo-operator.namespaceRestriction.enabled=true
+  --namespace ${NAMESPACE}
 
 # Step 4: Wait for platform pods to be ready (~2-3 minutes)
 echo "Waiting for platform pods to be ready..."
@@ -737,14 +826,6 @@ kubectl wait --for=condition=ready pod \
 # Step 5: Verify platform is running
 kubectl get pods -n ${NAMESPACE}
 # You should see: dynamo-operator, etcd, and nats pods in Running state
-
-# Step 6: Create HuggingFace token secret
-kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="${HF_TOKEN}" \
-  --namespace ${NAMESPACE}
-
-# Verify secret was created
-kubectl get secret hf-token-secret -n ${NAMESPACE}
 ```
 
 ### A3. Deploy Your First Model
@@ -830,15 +911,15 @@ kubectl logs ${WORKER_POD} -n ${NAMESPACE} --tail=50 --follow
 ```python
 %%python
 # Forward the frontend service port (run in a separate terminal, or add & to background)
-kubectl port-forward deployment/vllm-agg-router-frontend $USER_FRONTEND_PORT:8000 -n ${NAMESPACE}
+kubectl port-forward deployment/vllm-agg-router-frontend 10000:8000 -n ${NAMESPACE}
 
 # In another terminal, test the deployment:
 
 # Test 1: Check available models
-curl http://localhost:${USER_FRONTEND_PORT}/v1/models
+curl http://localhost:10000/v1/models
 
 # Test 2: Simple non-streaming chat completion
-curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+curl http://localhost:10000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -848,7 +929,7 @@ curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
   }'
 
 # Test 3: Streaming chat completion
-curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+curl http://localhost:10000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -858,7 +939,7 @@ curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
   }'
 
 # Test 4: With different parameters
-curl http://localhost:${USER_FRONTEND_PORT}/v1/chat/completions \
+curl http://localhost:10000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -881,7 +962,7 @@ pip install aiperf
 # Run a simple benchmark (adjust parameters as needed)
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://localhost:10000 \
   --endpoint-type chat \
   --streaming \
   --concurrency 1 \
@@ -890,7 +971,7 @@ aiperf profile \
 # Run with higher concurrency
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://localhost:10000 \
   --endpoint-type chat \
   --streaming \
   --concurrency 4 \
@@ -899,7 +980,7 @@ aiperf profile \
 # Run with request rate
 aiperf profile \
   --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:${USER_FRONTEND_PORT} \
+  --url http://localhost:10000 \
   --endpoint-type chat \
   --streaming \
   --request-rate 10 \
