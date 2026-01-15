@@ -163,7 +163,9 @@ grafana:
       disable_login_form: true
     auth.anonymous:
       enabled: true
-      org_role: Editor
+      org_role: Viewer
+    server:
+      root_url: ""
   service:
     type: NodePort
     nodePort: 30080
@@ -172,13 +174,12 @@ grafana:
       enabled: true
       label: grafana_dashboard
       searchNamespace: monitoring
-  additionalDataSources:
-    - name: Prometheus
-      type: prometheus
-      uid: prometheus
-      url: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
-      access: proxy
-      isDefault: true
+      env:
+        SKIP_TLS_VERIFY: "true"
+    datasources:
+      enabled: true
+      env:
+        SKIP_TLS_VERIFY: "true"
 EOF
 
 echo "Installing kube-prometheus-stack..."
@@ -479,7 +480,7 @@ echo "  - No 'newgrp' or logout required!"
 echo ""
 echo "Grafana access:"
 echo "  URL: http://<node-ip>:30080"
-echo "  Login: disabled (anonymous Editor access enabled)"
+echo "  Login: disabled (anonymous Viewer access enabled)"
 echo "  User: admin (if you re-enable login)"
 echo "  Password: $GRAFANA_ADMIN_PASSWORD"
 echo "  Hint: get node IPs with 'kubectl get nodes -o wide'"
