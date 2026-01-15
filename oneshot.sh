@@ -85,8 +85,12 @@ sudo snap unalias kubectl 2>/dev/null || true
 
 # Install standalone kubectl (works without group membership!)
 echo "Installing standalone kubectl..."
-KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-curl -L "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /tmp/kubectl
+KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt | head -n 1 | tr -d '\r\n')
+if [ -z "$KUBECTL_VERSION" ] || ! echo "$KUBECTL_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Unexpected kubectl version: $KUBECTL_VERSION" >&2
+    exit 1
+fi
+curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /tmp/kubectl
 chmod +x /tmp/kubectl
 sudo mv /tmp/kubectl /usr/local/bin/kubectl
 echo "✓ kubectl installed to /usr/local/bin/kubectl"
