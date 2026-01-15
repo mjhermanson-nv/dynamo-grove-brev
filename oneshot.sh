@@ -52,6 +52,7 @@ sudo microk8s status --wait-ready
 echo "Enabling addons..."
 sudo microk8s enable dns
 sudo microk8s enable nvidia  # NVIDIA GPU operator (Brev has NVIDIA drivers)
+sudo microk8s enable dashboard  # Kubernetes Dashboard UI
 
 # Export kubeconfig so kubectl works without group membership
 echo "Configuring kubectl access..."
@@ -121,6 +122,17 @@ kubectl wait --for=condition=available --timeout=60s deployment/local-path-provi
 # Set as default storage class
 kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 echo "✓ Storage provisioner installed and set as default"
+
+# Wait for Kubernetes Dashboard and save token
+echo "Waiting for Kubernetes Dashboard..."
+kubectl wait --for=condition=available --timeout=120s deployment/kubernetes-dashboard -n kube-system
+DASHBOARD_TOKEN=$(kubectl describe secret -n kube-system microk8s-dashboard-token | grep "token:" | awk '{print $2}')
+echo "$DASHBOARD_TOKEN" > ~/.kube/dashboard-token
+chmod 600 ~/.kube/dashboard-token
+if [ "$(id -u)" -eq 0 ]; then
+    chown $USER:$USER ~/.kube/dashboard-token
+fi
+echo "✓ Kubernetes Dashboard ready"
 
 # Install monitoring stack (Prometheus + Grafana)
 echo ""
@@ -467,6 +479,12 @@ echo "  Login: disabled (anonymous Editor access enabled)"
 echo "  User: admin (if you re-enable login)"
 echo "  Password: $GRAFANA_ADMIN_PASSWORD"
 echo "  Hint: get node IPs with 'kubectl get nodes -o wide'"
+echo ""
+echo "Kubernetes Dashboard access:"
+echo "  1. Start port-forward: kubectl port-forward -n kube-system service/kubernetes-dashboard 8001:443 --address 0.0.0.0"
+echo "  2. Open: https://<node-ip>:8001"
+echo "  3. Token saved in: ~/.kube/dashboard-token"
+echo "  4. Or get token: kubectl describe secret -n kube-system microk8s-dashboard-token"
 echo ""
 echo "Next steps:"
 echo "  1. Set up NGC authentication (required for Dynamo):"
