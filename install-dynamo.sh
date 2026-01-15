@@ -59,7 +59,8 @@ export DYNAMO_CHART_PATH="deploy/helm/charts/platform"
 
 # Check NGC authentication
 echo "Checking NGC authentication..."
-if ! helm registry login nvcr.io --username oauthtoken --password-stdin 2>/dev/null <<<"dummy" >/dev/null 2>&1; then
+HELM_REGISTRY_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/helm/registry/config.json"
+if [ ! -f "$HELM_REGISTRY_CONFIG" ] || ! grep -q "\"nvcr.io\"" "$HELM_REGISTRY_CONFIG"; then
     echo ""
     echo "⚠️  NGC authentication required!"
     echo ""
