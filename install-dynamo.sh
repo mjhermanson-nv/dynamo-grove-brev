@@ -53,7 +53,9 @@ fi
 
 # Set environment variables
 export NAMESPACE=dynamo-system
-export RELEASE_VERSION=0.3.2  # Update to latest version as needed
+export DYNAMO_REPO_URL="https://github.com/ai-dynamo/dynamo.git"
+export DYNAMO_REPO_REF="main"
+export DYNAMO_CHART_PATH="deploy/helm/charts/platform"
 
 # Check NGC authentication
 echo "Checking NGC authentication..."
@@ -116,49 +118,25 @@ echo ""
 echo "Creating namespace: $NAMESPACE"
 kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-# Step 1: Install Dynamo CRDs
+# Step 1: Install Dynamo Platform (from GitHub chart)
 echo ""
-echo "Step 1: Installing Dynamo CRDs..."
-cd /tmp
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-${RELEASE_VERSION}.tgz || {
-    echo "⚠️  Failed to fetch CRDs. Checking if CRDs already exist..."
-    if kubectl get crd dynamographdeployments.nvidia.com >/dev/null 2>&1; then
-        echo "✓ CRDs already exist, skipping installation"
-    else
-        echo "❌ CRDs not found and fetch failed."
-        echo "   Please ensure you have:"
-        echo "   1. NGC account access (https://catalog.ngc.nvidia.com/)"
-        echo "   2. Logged in: helm registry login nvcr.io"
-        echo "   3. Correct RELEASE_VERSION (check: https://github.com/ai-dynamo/dynamo/releases)"
-        exit 1
-    fi
-}
+echo "Step 1: Installing Dynamo Platform from GitHub..."
+TMP_DYNAMO_DIR=$(mktemp -d)
+git clone --depth 1 --branch "${DYNAMO_REPO_REF}" "${DYNAMO_REPO_URL}" "${TMP_DYNAMO_DIR}/dynamo"
 
-if [ -f "/tmp/dynamo-crds-${RELEASE_VERSION}.tgz" ]; then
-    helm install dynamo-crds /tmp/dynamo-crds-${RELEASE_VERSION}.tgz --namespace default || {
-        echo "⚠️  CRD installation failed, but continuing (may already exist)"
-    }
-    rm -f /tmp/dynamo-crds-${RELEASE_VERSION}.tgz
+CHART_DIR="${TMP_DYNAMO_DIR}/dynamo/${DYNAMO_CHART_PATH}"
+if [ ! -f "${CHART_DIR}/Chart.yaml" ]; then
+    echo "❌ Helm chart not found at ${CHART_DIR}"
+    exit 1
 fi
 
-# Step 2: Install Dynamo Platform
-echo ""
-echo "Step 2: Installing Dynamo Platform..."
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz || {
-    echo "❌ Failed to fetch Dynamo Platform."
-    echo "   Please ensure NGC authentication: helm registry login nvcr.io"
-    exit 1
-}
+echo "Updating Helm dependencies..."
+helm dependency update "${CHART_DIR}"
 
-# Bitnami moved images to bitnamilegacy repository (as of Aug 2025)
-# Override etcd image to use the legacy repository
-echo "Configuring etcd image to use bitnamilegacy repository..."
-helm install dynamo-platform /tmp/dynamo-platform-${RELEASE_VERSION}.tgz \
+echo "Installing/Upgrading Dynamo Platform chart..."
+helm upgrade --install dynamo-platform "${CHART_DIR}" \
     --namespace ${NAMESPACE} \
     --create-namespace \
-    --set global.security.allowInsecureImages=true \
-    --set etcd.image.registry=docker.io \
-    --set etcd.image.repository=bitnamilegacy/etcd \
     --wait \
     --timeout 10m || {
     echo "⚠️  Platform installation had issues, but continuing..."
@@ -166,8 +144,7 @@ helm install dynamo-platform /tmp/dynamo-platform-${RELEASE_VERSION}.tgz \
     echo "The installation will continue, but some pods may fail to pull images."
 }
 
-rm -f /tmp/dynamo-platform-${RELEASE_VERSION}.tgz
-cd - > /dev/null
+rm -rf "${TMP_DYNAMO_DIR}"
 
 # Wait for platform to be ready
 echo ""
@@ -275,7 +252,7 @@ if kubectl get pods -n ${NAMESPACE} 2>/dev/null | grep -qE "(ImagePullBackOff|Er
     echo "  kubectl describe pod <pod-name> -n ${NAMESPACE}"
 fi
 
-# Step 3: Install Grove (for multinode support and advanced features)
+# Step 2: Install Grove (for multinode support and advanced features)
 echo ""
 echo "Step 3: Setting up Grove..."
 echo "Grove enables advanced features like distributed KV cache and multinode deployments."
@@ -295,7 +272,7 @@ else
     echo "   See: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/index.html"
 fi
 
-# Step 4: Verify installation
+# Step 3: Verify installation
 echo ""
 echo "Step 4: Verifying installation..."
 echo ""
@@ -318,7 +295,7 @@ if [ "$FAILED_PODS" -gt 0 ]; then
     echo "  - CrashLoopBackOff: Check logs with: kubectl logs <pod-name> -n ${NAMESPACE}"
 fi
 
-# Step 5: Prepare for model deployment
+# Step 4: Prepare for model deployment
 echo ""
 echo "Step 5: Preparing for model deployment..."
 echo ""
