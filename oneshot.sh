@@ -122,6 +122,287 @@ kubectl wait --for=condition=available --timeout=60s deployment/local-path-provi
 kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 echo "✓ Storage provisioner installed and set as default"
 
+# Install monitoring stack (Prometheus + Grafana)
+echo ""
+echo "Installing monitoring stack (Prometheus + Grafana)..."
+
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Adding Helm repos for monitoring..."
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+if command -v openssl >/dev/null 2>&1; then
+    GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '=+/')
+else
+    GRAFANA_ADMIN_PASSWORD="admin-$(date +%s)"
+fi
+
+cat <<EOF >/tmp/kube-prometheus-stack-values.yaml
+grafana:
+  enabled: true
+  adminPassword: "${GRAFANA_ADMIN_PASSWORD}"
+  service:
+    type: NodePort
+    nodePort: 30080
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: monitoring
+  additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      uid: prometheus
+      url: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+      access: proxy
+      isDefault: true
+EOF
+
+echo "Installing kube-prometheus-stack..."
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+    -n monitoring \
+    -f /tmp/kube-prometheus-stack-values.yaml \
+    --wait
+
+echo "Provisioning Grafana dashboards..."
+kubectl apply -n monitoring -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cluster-overview
+  labels:
+    grafana_dashboard: "1"
+data:
+  cluster-overview.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Nodes",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "count(kube_node_info)", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "Pods",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "count(kube_pod_info)", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "CPU Usage (cores)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"kubelet\",image!=\"\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "Memory Usage (bytes)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{job=\"kubelet\",image!=\"\"})",
+              "refId": "A"
+            }
+          ],
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+        },
+        {
+          "type": "timeseries",
+          "title": "CPU Usage by Node",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) by (instance)", "refId": "A" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+        }
+      ],
+      "schemaVersion": 36,
+      "title": "Kubernetes Cluster Overview",
+      "version": 1,
+      "refresh": "30s",
+      "timezone": "browser"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-nats
+  labels:
+    grafana_dashboard: "1"
+data:
+  nats.json: |
+    {
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Connections",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "nats_varz_connections", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "In Msgs",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "nats_varz_in_msgs", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "Out Msgs",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "nats_varz_out_msgs", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "CPU (%)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "nats_server_cpu", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Message Rate",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "rate(nats_varz_in_msgs[5m])", "refId": "A" },
+            { "expr": "rate(nats_varz_out_msgs[5m])", "refId": "B" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+        }
+      ],
+      "schemaVersion": 36,
+      "title": "NATS Overview",
+      "version": 1,
+      "refresh": "30s",
+      "timezone": "browser"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-etcd
+  labels:
+    grafana_dashboard: "1"
+data:
+  etcd.json: |
+    {
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Has Leader",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "max(etcd_server_has_leader)", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "DB Size (bytes)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [{ "expr": "max(etcd_mvcc_db_total_size_in_bytes)", "refId": "A" }],
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Proposals Committed",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "rate(etcd_server_proposals_committed_total[5m])", "refId": "A" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+        }
+      ],
+      "schemaVersion": 36,
+      "title": "etcd Overview",
+      "version": 1,
+      "refresh": "30s",
+      "timezone": "browser"
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-dynamo-operator
+  labels:
+    grafana_dashboard: "1"
+data:
+  dynamo-operator.json: |
+    {
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "type": "text",
+          "title": "Notes",
+          "options": {
+            "content": "This dashboard uses controller-runtime metrics. If you have custom Dynamo metrics, update the queries accordingly.",
+            "mode": "markdown"
+          },
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Reconciles (total)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(rate(controller_runtime_reconcile_total{job=~\".*dynamo.*\"}[5m]))", "refId": "A" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Reconcile Errors",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(rate(controller_runtime_reconcile_errors_total{job=~\".*dynamo.*\"}[5m]))", "refId": "A" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Workqueue Depth",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(workqueue_depth{name=~\".*dynamo.*\"})", "refId": "A" }
+          ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 }
+        }
+      ],
+      "schemaVersion": 36,
+      "title": "Dynamo Operator",
+      "version": 1,
+      "refresh": "30s",
+      "timezone": "browser"
+    }
+EOF
+
+# Wait for Grafana to be ready
+kubectl wait --for=condition=available --timeout=180s deployment/kube-prometheus-stack-grafana -n monitoring
+
 # Final permission fix for any files created by microk8s
 if [ "$(id -u)" -eq 0 ] && [ -d "$HOME/.kube" ]; then
     chown -R $USER:$USER "$HOME/.kube" 2>/dev/null || true
@@ -170,8 +451,15 @@ echo "💡 How it works:"
 echo "  - kubectl, helm, k9s are standalone binaries (/usr/local/bin/)"
 echo "  - Use ~/.kube/config automatically"
 echo "  - Storage provisioner ready for Dynamo/Grove PVCs"
+echo "  - Grafana available via NodePort on 30080"
 echo "  - No group membership needed!"
 echo "  - No 'newgrp' or logout required!"
+echo ""
+echo "Grafana access:"
+echo "  URL: http://<node-ip>:30080"
+echo "  User: admin"
+echo "  Password: $GRAFANA_ADMIN_PASSWORD"
+echo "  Hint: get node IPs with 'kubectl get nodes -o wide'"
 echo ""
 echo "Next steps:"
 echo "  1. Set up NGC authentication (required for Dynamo):"
