@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Lab 1: Disaggregated Serving with vLLM
+# This deploys a disaggregated serving topology with separate prefill and decode workers
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disagg-router
+spec:
+  services:
+    Frontend:
+      dynamoNamespace: vllm-disagg-router
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+      envs:
+        - name: DYN_ROUTER_MODE
+          value: disaggregated
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      dynamoNamespace: vllm-disagg-router
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      envs:
+        - name: DYN_LOG
+          value: "info"
+      extraPodSpec:
+        volumes:
+        - name: local-model-cache
+          hostPath:
+            path: /data/huggingface-cache  # Will be updated with actual cache path
+            type: DirectoryOrCreate
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+          - name: local-model-cache
+            mountPath: /root/.cache
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      dynamoNamespace: vllm-disagg-router
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      envs:
+        - name: DYN_LOG
+          value: "info"
+      extraPodSpec:
+        volumes:
+        - name: local-model-cache
+          hostPath:
+            path: /data/huggingface-cache  # Will be updated with actual cache path
+            type: DirectoryOrCreate
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+          - name: local-model-cache
+            mountPath: /root/.cache
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
+
+---
+# NodePort Service to expose the frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-frontend-nodeport
+spec:
+  type: NodePort
+  selector:
+    nvidia.com/dynamo-component: Frontend
+    nvidia.com/dynamo-graph-deployment-name: vllm-disagg-router
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30100
+    protocol: TCP
+    name: http

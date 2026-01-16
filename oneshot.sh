@@ -81,6 +81,32 @@ done
 # Export for current session
 export KUBECONFIG=$HOME/.kube/config
 
+# Set default NVIDIA Dynamo environment variables
+echo "Setting up Dynamo environment variables..."
+for shell_config in ~/.bashrc ~/.zshrc; do
+    if [ -f "$shell_config" ] && ! grep -q "DYNAMO" "$shell_config"; then
+        cat >> "$shell_config" <<'DYNAMO_ENV'
+
+# NVIDIA Dynamo configuration
+export RELEASE_VERSION="0.7.1"
+export NAMESPACE="dynamo"
+export CACHE_PATH="/data/huggingface-cache"
+DYNAMO_ENV
+        if [ "$(id -u)" -eq 0 ]; then
+            chown $USER:$USER "$shell_config"
+        fi
+    fi
+done
+
+# Export for current session
+export RELEASE_VERSION="0.7.1"
+export NAMESPACE="dynamo"
+export CACHE_PATH="/data/huggingface-cache"
+
+# Create cache directory if it doesn't exist
+sudo mkdir -p /data/huggingface-cache
+sudo chmod 777 /data/huggingface-cache
+
 # Remove any existing snap alias (it requires group membership)
 sudo snap unalias kubectl 2>/dev/null || true
 

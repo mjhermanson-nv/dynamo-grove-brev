@@ -1,0 +1,5 @@
+# Jupytext configuration
+# Markdown is the authoritative source
+
+formats = "md,ipynb"
+notebook_metadata_filter = "-all"

@@ -1,0 +1,28 @@
+# Jupyter Notebook
+**/.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Jupyter Notebook cell outputs
+# Keep the notebook structure but ignore execution outputs
+# Use jupytext or nbstripout for better control
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
