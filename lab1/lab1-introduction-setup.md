@@ -1,10 +1,24 @@
+---
+jupyter:
+  jupytext:
+    cell_metadata_filter: -all
+    formats: ipynb,md
+    main_language: bash
+    notebook_metadata_filter: jupytext,-kernelspec,-widgets,-language_info
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.18.1
+---
+
 # Lab 1: Introduction and Kubernetes-Based Deployment
 
 ## Overview
 
 In this lab, you will:
-- Set up your namespace in the Kubernetes cluster
-- Deploy Dynamo platform on Kubernetes
+- Set up your personal namespace in the shared Kubernetes cluster
+- Deploy Dynamo using namespace-scoped operator on Kubernetes
 - Configure a backend engine using aggregated serving
 - Test the deployment with OpenAI-compatible API
 - Benchmark the deployment using AI-Perf
@@ -16,17 +30,16 @@ In this lab, you will:
 ## Section 1: Environment Setup
 
 ### Objectives
-- Verify Kubernetes access
-- Create your namespace
-- Install Dynamo dependencies
+- Verify Kubernetes access (shared cluster)
+- Create your personal namespace
+- Install Dynamo dependencies in your namespace
 - Set up prerequisites (kubectl, helm)
 
 ### Prerequisites
 Before starting, ensure you have:
-- ✅ Single-node Kubernetes cluster (MicroK8s recommended)
-- ✅ `kubectl` installed (version 1.24+)
+- ✅ Kubernetes cluster access (kubeconfig provided by instructor)
+- ✅ `kubectl` installed (version 1.24+) or `microk8s kubectl`
 - ✅ `helm` 3.x installed
-- ✅ NGC API key from [ngc.nvidia.com](https://ngc.nvidia.com/) (for container image access)
 - ✅ HuggingFace token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 
 ### Step 2: Set Configuration Variables
@@ -34,14 +47,13 @@ Before starting, ensure you have:
 Set your configuration variables. **Replace the values below with your own:**
 
 
-
-```python
+```bash
 import os
 
 # Set lab configuration
 os.environ['RELEASE_VERSION'] = '0.7.1'
 os.environ['NAMESPACE'] = 'dynamo-lab1'
-os.environ['HF_TOKEN'] = ''  # Replace with your HuggingFace token
+os.environ['HF_TOKEN'] = ''  # Will be set securely in a later cell
 os.environ['CACHE_PATH'] = '/data/huggingface-cache'  # Local cache path
 
 NAMESPACE = os.environ['NAMESPACE']
@@ -67,9 +79,7 @@ print("━━━━━━━━━━━━━━━━━━━━━━━━�
 ### Step 3: Verify Kubernetes Access
 
 
-
 ```bash
-%%bash
 # Verify kubectl is installed and configured
 kubectl version --client
 
@@ -92,11 +102,10 @@ To access NVIDIA's Dynamo container images, you need to authenticate with NGC (N
 4. Select **"Setup"** → **"Generate API Key"**
 5. Copy your API key (it will only be shown once!)
 
-#### Get and Save Your NGC API Key
+#### Login to NGC Container Registry
 
 
-
-```python
+```bash
 import os
 import getpass
 
@@ -114,127 +123,218 @@ print("✓ NGC API key saved")
 print("  You can now use it to login and create pull secrets")
 ```
 
-#### Login to NGC Container Registry
+#### Set HuggingFace Token
 
-
+HuggingFace token is required to download models. Get yours from https://huggingface.co/settings/tokens
 
 ```bash
-%%bash
-# Login to NGC container registry
-echo $NGC_API_KEY | helm registry login nvcr.io --username '$oauthtoken' --password-stdin
+import os
+import getpass
 
-echo ""
-echo "✓ NGC authentication complete"
-echo "  You can now pull Dynamo container images"
+# Get HuggingFace token from user
+print("Enter your HuggingFace Token from https://huggingface.co/settings/tokens")
+print("(Create a 'Read' token if you don't have one)")
+print("")
+HF_TOKEN = getpass.getpass("HF Token: ")
+
+# Save to environment
+os.environ['HF_TOKEN'] = HF_TOKEN
+print("✓ HuggingFace token saved to environment")
+```
+
+#### Login to NGC Registry
+
+```bash
+import os
+import subprocess
+
+# Login to NGC container registry
+ngc_key = os.environ.get('NGC_API_KEY')
+result = subprocess.run(
+    ['helm', 'registry', 'login', 'nvcr.io', '--username', '$oauthtoken', '--password-stdin'],
+    input=ngc_key,
+    text=True,
+    capture_output=True
+)
+print(result.stdout)
+if result.returncode != 0:
+    print(result.stderr)
+
+print("")
+print("✓ NGC authentication complete")
+print("  You can now pull Dynamo container images")
 ```
 
 ### Step 5: Create Your Namespace
 
-
-
 ```bash
-%%bash
-# Create your namespace
-kubectl create namespace $NAMESPACE
+import os
+import subprocess
+
+# Create the namespace
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+result = subprocess.run(['kubectl', 'create', 'namespace', namespace], 
+                       capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0 and "AlreadyExists" not in result.stderr:
+    print(result.stderr)
 
 # Verify namespace was created
-kubectl get namespace $NAMESPACE
+result = subprocess.run(['kubectl', 'get', 'namespace', namespace], 
+                       capture_output=True, text=True)
+print(result.stdout)
 ```
 
 ### Step 6: Create NGC Pull Secret
 
 Create a Kubernetes secret so that pods can pull images from NGC.
 
-
-
 ```bash
-%%bash
-# Create NGC image pull secret
-kubectl create secret docker-registry ngc-secret \
-  --docker-server=nvcr.io \
-  --docker-username='$oauthtoken' \
-  --docker-password=$NGC_API_KEY \
-  --namespace $NAMESPACE
+import os
+import subprocess
 
-# Verify secret was created
-kubectl get secret ngc-secret -n $NAMESPACE
-echo "✓ NGC pull secret created in namespace: $NAMESPACE"
+# Get variables
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+ngc_key = os.environ.get('NGC_API_KEY')
+
+# Create NGC image pull secret
+result = subprocess.run([
+    'kubectl', 'create', 'secret', 'docker-registry', 'ngc-secret',
+    '--docker-server=nvcr.io',
+    '--docker-username=$oauthtoken',
+    f'--docker-password={ngc_key}',
+    '--namespace', namespace
+], capture_output=True, text=True)
+
+print(result.stdout)
+if result.returncode != 0 and "AlreadyExists" not in result.stderr:
+    print(result.stderr)
+else:
+    # Verify secret was created
+    result = subprocess.run(['kubectl', 'get', 'secret', 'ngc-secret', '-n', namespace], 
+                           capture_output=True, text=True)
+    print(result.stdout)
+    print(f"✓ NGC pull secret created in namespace: {namespace}")
 ```
 
 ### Step 7: Create HuggingFace Token Secret
 
-
-
 ```bash
-%%bash
-# Create HuggingFace token secret
-kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="$HF_TOKEN" \
-  --namespace $NAMESPACE
+import os
+import subprocess
 
-# Verify secret was created
-kubectl get secret hf-token-secret -n $NAMESPACE
-echo "✓ HuggingFace token secret created"
+# Get variables
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+hf_token = os.environ.get('HF_TOKEN', '')
+
+# Create HuggingFace token secret
+result = subprocess.run([
+    'kubectl', 'create', 'secret', 'generic', 'hf-token-secret',
+    f'--from-literal=HF_TOKEN={hf_token}',
+    '--namespace', namespace
+], capture_output=True, text=True)
+
+print(result.stdout)
+if result.returncode != 0 and "AlreadyExists" not in result.stderr:
+    print(result.stderr)
+else:
+    # Verify secret was created
+    result = subprocess.run(['kubectl', 'get', 'secret', 'hf-token-secret', '-n', namespace], 
+                           capture_output=True, text=True)
+    print(result.stdout)
+    print("✓ HuggingFace token secret created")
 ```
 
 ## Section 2: Install Dynamo Platform
 
 ### Objectives
 - Install Dynamo CRDs (Custom Resource Definitions)
-- Install Dynamo platform (etcd, NATS, operator) in your namespace
+- Install Dynamo platform (etcd, NATS, operator) 
 - Verify platform components are running
 
 ### Architecture
 ```
-Client → Frontend → Router → Worker(s) with Backend Engine
-                        ↓
-                 etcd + NATS
-                        ↓
-                Dynamo Operator
+Client Request
+      ↓
+Frontend (OpenAI API + Disaggregated Router)
+      ↓
+Prefill Worker (GPU 0) → Processes prompt → Generates KV cache
+      ↓
+Decode Worker (GPU 1) → Uses KV cache → Generates tokens
+      ↓
+      ↓
+   etcd + NATS (Coordination & Messaging)
+      ↓
+Dynamo Operator (Manages Resources)
 ```
 
-### Step 1: Install Dynamo CRDs
+### Deployment Mode
 
-CRDs are cluster-wide resources that define the custom resources used by Dynamo.
+We're using the **recommended cluster-wide deployment** (default). According to the [official Dynamo documentation](https://github.com/ai-dynamo/dynamo/blob/main/deploy/helm/charts/platform/README.md):
 
+- ✅ **Recommended**: One cluster-wide operator per cluster (default)
+- This is the standard deployment for single-node and production clusters
+- Install a **namespace-scoped Dynamo operator** that only manages resources in your namespace
+- The CRDs are cluster-wide and should already be installed (check first)
+
+### Step 1: Check if Dynamo CRDs Are Installed
+
+**Note:** CRDs are cluster-wide resources and only need to be installed **once per cluster**. If already installed, skip to Step 2.
 
 
 ```bash
-%%bash
 # Check if CRDs already exist
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
     echo "✓ CRDs already installed"
     kubectl get crd | grep nvidia.com
 else
-    echo "Installing Dynamo CRDs..."
-    helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
-    helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
-    
-    echo ""
-    echo "Verifying CRD installation:"
-    kubectl get crd | grep nvidia.com
+    echo "⚠️  CRDs not found. Ask instructor to install them, or proceed with Step 1b"
 fi
+```
+
+### Step 1b: Install CRDs (Optional - Instructor May Do This)
+
+**Skip this step if CRDs are already installed.** If needed, run:
+
+
+```bash
+# Install Dynamo CRDs (only if not already installed)
+echo "Installing Dynamo CRDs..."
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
+helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
+
+echo ""
+echo "Verifying CRD installation:"
+kubectl get crd | grep nvidia.com
 ```
 
 ### Step 2: Install Dynamo Platform
 
-This installs ETCD, NATS, and the Dynamo Operator Controller in your namespace.
-
+This installs ETCD, NATS, and the Dynamo Operator Controller (cluster-wide by default).
 
 
 ```bash
-%%bash
+import subprocess
+import os
+
+release_version = os.environ.get('RELEASE_VERSION', '0.7.1')
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
 # Download platform chart
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-$RELEASE_VERSION.tgz
+chart_url = f"https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-{release_version}.tgz"
+subprocess.run(['helm', 'fetch', chart_url])
 
-# Install Dynamo platform
-echo "Installing Dynamo platform in namespace: $NAMESPACE"
-helm install dynamo-platform dynamo-platform-$RELEASE_VERSION.tgz \
-  --namespace $NAMESPACE
+# Install Dynamo platform (cluster-wide by default - recommended)
+print(f"Installing Dynamo platform in namespace: {namespace}")
+subprocess.run([
+    'helm', 'install', 'dynamo-platform',
+    f'dynamo-platform-{release_version}.tgz',
+    '--namespace', namespace
+])
 
-echo ""
-echo "Platform installation initiated. Waiting for pods to be ready..."
+print("")
+print("Platform installation initiated. Waiting for pods to be ready...")
 ```
 
 ### Step 3: Wait for Platform Pods to Be Ready
@@ -242,43 +342,82 @@ echo "Platform installation initiated. Waiting for pods to be ready..."
 Re-run the following cell until all pods report as "Running"
 
 
-
 ```bash
-%%bash
-kubectl get pods -n $NAMESPACE
+import subprocess
+import os
+
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Check pods in namespace
+subprocess.run(['kubectl', 'get', 'pods', '-n', namespace])
 ```
 
-## Section 3: Deploy Your First Model with Aggregated Serving
+
+
+
+
+## Section 3: Deploy Your First Model with Disaggregated Serving
 
 ### Objectives
-- Understand aggregated serving architecture
-- Configure and deploy a model using vLLM backend
+- Understand disaggregated serving architecture
+- Configure and deploy a model using vLLM backend with separate prefill and decode workers
 - Use Kubernetes manifests to deploy Dynamo resources
 
 ### Available Backends
-In this lab, we'll use **vLLM** with aggregated serving for simplicity:
+In this lab, we'll use **vLLM** with disaggregated serving:
 - **vLLM**: High-throughput serving with PagedAttention
 - Model: `Qwen/Qwen2.5-1.5B-Instruct` (small, fast to download)
-- Architecture: Aggregated serving with KV-cache routing
+- Architecture: Disaggregated serving with separate prefill and decode workers
 
 **Other backends** (for exploration):
 - **SGLang**: Optimized for complex prompting and structured generation
 - **TensorRT-LLM**: Maximum performance on NVIDIA GPUs
 
+### What is Disaggregated Serving?
+
+Disaggregated serving separates the inference pipeline into specialized workers:
+
+**Prefill Worker** (GPU 0):
+- Processes input prompts (compute-intensive)
+- Converts tokens into KV cache
+- Passes KV cache to decode workers
+
+**Decode Worker** (GPU 1):
+- Generates output tokens (memory-intensive)
+- Uses KV cache from prefill worker
+- Produces the final response
+
+**Benefits:**
+- ✅ **Independent scaling**: Scale prefill and decode separately based on workload
+- ✅ **Resource optimization**: Each worker optimized for its specific task
+- ✅ **Better throughput**: Specialized workers can handle more requests
+
+**Architecture:**
+```
+Client Request
+    ↓
+Frontend (Router)
+    ↓
+Prefill Worker (GPU 0) → processes prompt → generates KV cache
+    ↓
+Decode Worker (GPU 1) → receives KV cache → generates tokens
+    ↓
+Response to Client
+```
+
 ### Deployment Configuration
 
 We'll use a `DynamoGraphDeployment` resource that defines:
-- **Frontend**: OpenAI-compatible API endpoint with KV-cache routing
-- **Worker**: vLLM worker with 1 GPU running the model
+- **Frontend**: OpenAI-compatible API endpoint with disaggregated routing
+- **VllmPrefillWorker**: 1 replica on GPU 0 for prompt processing
+- **VllmDecodeWorker**: 1 replica on GPU 1 for token generation
 
 ### Step 1: Update the Deployment Configuration
 
 Before deploying, we need to update the YAML configuration with your specific values:
 
 
-
 ```bash
-%%bash
 # Update agg_router.yaml with your configuration
 
 # Replace my-tag with actual version
@@ -296,160 +435,277 @@ grep "image:" agg_router.yaml
 ### Step 2: Deploy the Model
 
 
-
 ```bash
-%%bash
-# Apply the deployment
-kubectl apply -f agg_router.yaml --namespace $NAMESPACE
+import subprocess
+import os
 
-echo ""
-echo "✓ Deployment created. This will take 4-6 minutes for first run."
-echo "  - Pulling container images"
-echo "  - Downloading model from HuggingFace"
-echo "  - Loading model into GPU memory"
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Apply the deployment
+result = subprocess.run(
+    ['kubectl', 'apply', '-f', 'agg_router.yaml', '--namespace', namespace],
+    capture_output=True,
+    text=True
+)
+
+print(result.stdout)
+if result.stderr:
+    print(result.stderr)
+
+print("")
+print("✓ Deployment created. This will take 4-6 minutes for first run.")
+print("  - Pulling container images")
+print("  - Downloading model from HuggingFace")
+print("  - Loading model into GPU memory")
 ```
 
 ### Step 3: Monitor Deployment Progress
 
 
-
 ```bash
-%%bash
+import subprocess
+import os
+
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
 # Check deployment status
-kubectl get dynamographdeployment -n $NAMESPACE
+print("Checking DynamoGraphDeployment status:")
+subprocess.run(['kubectl', 'get', 'dynamographdeployment', '-n', namespace])
 
-echo ""
-echo "Pod status (wait for all pods to be 1/1 Ready):"
-kubectl get pods -n $NAMESPACE | grep vllm
+print("\nPod status (wait for all pods to be 1/1 Ready):")
+result = subprocess.run(
+    ['kubectl', 'get', 'pods', '-n', namespace],
+    capture_output=True,
+    text=True
+)
+# Filter for vllm pods - we should see both prefill and decode workers
+for line in result.stdout.split('\n'):
+    if 'vllm' in line.lower() or 'NAME' in line:
+        print(line)
 
-# To watch in real-time, uncomment the line below:
-# kubectl get pods -n $NAMESPACE -w
+print("\n# Expected pods:")
+print("#   - vllm-disagg-router-frontend-xxxxx     (Frontend)")
+print("#   - vllm-disagg-router-vllmprefillworker-xxxxx (Prefill Worker on GPU 0)")
+print("#   - vllm-disagg-router-vllmdecodeworker-xxxxx  (Decode Worker on GPU 1)")
+print("\n# To watch in real-time, run: kubectl get pods -n", namespace, "-w")
 ```
 
 ### Step 4: View Worker Logs (Optional)
 
-While waiting for the deployment, you can watch the model loading progress:
+While waiting for the deployment, you can watch the model loading progress in both workers.
 
+**Note**: In disaggregated serving, both the prefill and decode workers load the model separately.
 
 
 ```bash
-%%bash
-# Get logs from the worker pod
-WORKER_POD=$(kubectl get pods -n $NAMESPACE | grep vllmdecodeworker | head -1 | awk '{print $1}')
+import subprocess
+import os
 
-if [ -n "$WORKER_POD" ]; then
-    echo "Viewing logs from: $WORKER_POD"
-    echo "Look for:"
-    echo "  - 'Loading model weights...' (downloading)"
-    echo "  - 'Model loading took X.XX GiB' (loaded)"
-    echo ""
-    kubectl logs $WORKER_POD -n $NAMESPACE --tail=30
-else
-    echo "Worker pod not found yet, please wait and try again"
-fi
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Get logs from worker pods
+result = subprocess.run(
+    ['kubectl', 'get', 'pods', '-n', namespace],
+    capture_output=True,
+    text=True
+)
+
+prefill_pod = None
+decode_pod = None
+for line in result.stdout.split('\n'):
+    if 'vllmprefillworker' in line.lower():
+        prefill_pod = line.split()[0]
+    elif 'vllmdecodeworker' in line.lower():
+        decode_pod = line.split()[0]
+
+if prefill_pod:
+    print(f"=== Prefill Worker Logs (GPU 0): {prefill_pod} ===")
+    print("Look for:")
+    print("  - 'Loading model weights...' (downloading)")
+    print("  - 'Model loading took X.XX GiB' (loaded)")
+    print("")
+    subprocess.run(['kubectl', 'logs', prefill_pod, '-n', namespace, '--tail=30'])
+    print("\n")
+
+if decode_pod:
+    print(f"=== Decode Worker Logs (GPU 1): {decode_pod} ===")
+    print("Look for:")
+    print("  - 'Loading model weights...' (downloading)")
+    print("  - 'Model loading took X.XX GiB' (loaded)")
+    print("")
+    subprocess.run(['kubectl', 'logs', decode_pod, '-n', namespace, '--tail=30'])
+    
+if not prefill_pod and not decode_pod:
+    print("Worker pods not found yet, please wait and try again")
 ```
 
 ## Section 4: Testing and Validation
 
 ### Objectives
-- Access the service via NodePort
+- Expose the service locally using port forwarding
 - Send test requests to the deployment
 - Verify OpenAI API compatibility
 - Test streaming and non-streaming responses
 
 ### Testing Strategy
 Once your deployment is running (`1/1 Ready`), you'll:
-1. Get the node IP address
-2. Access the service on NodePort 30100
-3. Test with curl commands
-4. Verify response format and functionality
+1. Forward the frontend service port to localhost
+2. Test with curl commands
+3. Verify response format and functionality
 
-### Step 1: Get Node IP and Service URL
+### Step 1: Set Up Port Forwarding
 
-The frontend is exposed as a NodePort service on port 30100:
+Forward the service port to localhost (run in background):
 
 
+
+### Understanding Disaggregated Serving Trade-offs
+
+Now that your deployment is running, let's understand when and why disaggregated serving is beneficial:
+
+**When to Use Disaggregated:**
+- ✅ **Large models** (70B+ parameters) where compute and memory demands differ
+- ✅ **High throughput scenarios** where prefill and decode have different scaling needs
+- ✅ **Long input prompts** where prefill becomes a bottleneck
+- ✅ **Production deployments** with predictable traffic patterns
+
+**When Aggregated is Better:**
+- ✅ **Small to medium models** (< 13B parameters) like we're using here
+- ✅ **Development and testing** where simplicity matters
+- ✅ **Unpredictable workloads** where flexibility is key
+- ✅ **Resource-constrained environments** with limited GPUs
+
+**Key Differences:**
+
+| Aspect | Aggregated | Disaggregated |
+|--------|-----------|---------------|
+| Architecture | Single worker type | Separate prefill & decode |
+| GPU Utilization | Both phases on same GPU | Specialized per GPU |
+| Scaling | Scale all workers together | Scale prefill/decode independently |
+| Complexity | Simpler | More complex coordination |
+| Latency | Lower for small batches | Better for large throughput |
+| Resource Usage | More flexible | More optimized |
+
+**In this lab:**
+We're using disaggregated serving with a small model (1.5B) primarily for **educational purposes** to demonstrate the architecture pattern. In production, you would typically use aggregated serving for models this size.
 
 ```bash
-%%bash
+import subprocess
+
 # Get the node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-echo "Node IP: $NODE_IP"
-echo ""
-echo "Frontend URL: http://$NODE_IP:30100"
-echo ""
-echo "✓ Access the frontend at: http://$NODE_IP:30100"
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+
+node_ip = result.stdout.strip()
+print(f"Node IP: {node_ip}")
+print("")
+print(f"Frontend URL: http://{node_ip}:30100")
+print("")
+print(f"✓ Access the frontend at: http://{node_ip}:30100")
 ```
 
 ### Step 2: Test the `/v1/models` Endpoint
 
 
-
 ```bash
-%%bash
-# Get node IP for testing
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
 
-curl http://$NODE_IP:30100/v1/models
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+# Test the /v1/models endpoint
+subprocess.run(['curl', f'http://{node_ip}:30100/v1/models'])
 ```
 
 ### Step 3: Simple Non-Streaming Chat Completion
 
 
-
 ```bash
-%%bash
-# Get node IP for testing
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
 
-curl http://$NODE_IP:30100/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{ 
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+# Test non-streaming chat completion
+subprocess.run([
+    'curl', f'http://{node_ip}:30100/v1/chat/completions',
+    '-H', 'Content-Type: application/json',
+    '-d', '''{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Hello! How are you?"}], 
+    "messages": [{"role": "user", "content": "Hello! How are you?"}],
     "stream": false,
-    "max_tokens": 50 
-  }'
+    "max_tokens": 50
+  }'''
+])
 ```
 
 ### Step 4: Test Streaming Response
 
 
-
 ```bash
-%%bash
-# Get node IP for testing
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
 
-curl http://$NODE_IP:30100/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{ 
-    "model": "Qwen/Qwen2.5-1.5B-Instruct", 
-    "messages": [{"role": "user", "content": "Write a short poem about AI"}], 
-    "stream": true, 
-    "max_tokens": 100 
-  }'
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+# Test streaming chat completion
+subprocess.run([
+    'curl', f'http://{node_ip}:30100/v1/chat/completions',
+    '-H', 'Content-Type: application/json',
+    '-d', '''{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Write a short poem about AI"}],
+    "stream": true,
+    "max_tokens": 100
+  }'''
+])
 ```
 
 ### Step 5: Test with Different Parameters
 
 
-
 ```bash
-%%bash
-# Get node IP for testing
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
 
-curl http://$NODE_IP:30100/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{ 
-    "model": "Qwen/Qwen2.5-1.5B-Instruct", 
-    "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}], 
-    "stream": false, 
-    "temperature": 0.7, 
-    "max_tokens": 100, 
-    "top_p": 0.9 
-  }'
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+# Test with different parameters
+subprocess.run([
+    'curl', f'http://{node_ip}:30100/v1/chat/completions',
+    '-H', 'Content-Type: application/json',
+    '-d', '''{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}],
+    "stream": false,
+    "temperature": 0.7,
+    "max_tokens": 100,
+    "top_p": 0.9
+  }'''
+])
 ```
 
 ## Section 5: Benchmarking with AI-Perf
@@ -475,78 +731,103 @@ You'll run AI-Perf from your local machine against the port-forwarded service, s
 ### Step 1: Install AI-Perf (if not already installed)
 
 
-
-```python
-%%python
+```bash
 # Install AI-Perf benchmarking tool
-!pip install aiperf -q
+!uv pip install aiperf -q
 print("✓ AI-Perf installed")
 ```
 
 ### Step 2: Run Baseline Benchmark (Low Concurrency)
 
 
-
 ```bash
-%%bash
-# Get node IP for benchmarking
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
+
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+print("Running low concurrency benchmark...")
 
 # Run a simple benchmark with low concurrency
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://$NODE_IP:30100 \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency 1 \
-  --request-count 100
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', f'http://{node_ip}:30100',
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--concurrency', '1',
+    '--request-count', '100'
+])
 
-echo ""
-echo "✓ Baseline benchmark complete"
+print("\n✓ Baseline benchmark complete")
 ```
 
 ### Step 3: Run Benchmark with Higher Concurrency
 
 
-
 ```bash
-%%bash
-# Get node IP for benchmarking
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
+
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+print("Running high concurrency benchmark...")
 
 # Test with higher concurrency to stress test
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://$NODE_IP:30100 \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency 4 \
-  --request-count 200
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', f'http://{node_ip}:30100',
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--concurrency', '4',
+    '--request-count', '200'
+])
 
-echo ""
-echo "✓ High concurrency benchmark complete"
+print("\n✓ High concurrency benchmark complete")
 ```
 
 ### Step 4: Run Benchmark with Request Rate
 
 
-
 ```bash
-%%bash
-# Get node IP for benchmarking
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+import subprocess
+
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+
+print("Running request rate benchmark...")
 
 # Test with request rate instead of concurrency
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://$NODE_IP:30100 \
-  --endpoint-type chat \
-  --streaming \
-  --request-rate 10 \
-  --request-count 200
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', f'http://{node_ip}:30100',
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--request-rate', '10',
+    '--request-count', '200'
+])
 
-echo ""
-echo "✓ Request rate benchmark complete"
+print("\n✓ Request rate benchmark complete")
 ```
 
 ### Step 5: Analyze Results
@@ -557,88 +838,26 @@ Review the benchmark outputs above. Key metrics to look for:
 - **TPOT (Time Per Output Token)**: Generation speed
 - **End-to-end latency**: Total request time
 
-## Section 6: Exercises and Exploration
-
-### Exercise 1: Scale Your Deployment
-
-Try scaling to multiple worker replicas and observe KV-cache routing in action:
 
 
-
-```bash
-%%bash
-# Scale the deployment to 2 replicas
-# First, update the agg_router.yaml file (change replicas: 1 to replicas: 2)
-# Then reapply:
-
-# Quick way: use kubectl patch
-kubectl patch dynamographdeployment vllm-agg-router -n $NAMESPACE --type='json' \
-  -p='[{"op": "replace", "path": "/spec/services/VllmDecodeWorker/replicas", "value":2}]'
-
-echo ""
-echo "✓ Scaling to 2 workers"
-echo "Watch the new worker come online:"
-kubectl get pods -n $NAMESPACE -w
-```
-
-Check load distribution across workers:
-
-
-
-```bash
-%%bash
-# View logs from all workers to see load distribution
-kubectl logs -l component=VllmDecodeWorker -n $NAMESPACE --tail=20
-```
-
-### Exercise 2: Parameter Tuning
-
-Experiment with vLLM parameters by modifying the worker args. Common parameters to try:
-- `--max-num-seqs`: Maximum number of sequences per iteration
-- `--gpu-memory-utilization`: GPU memory fraction to use (default 0.9)
-- `--max-model-len`: Maximum sequence length
-
-To update, you'll need to edit `agg_router.yaml` and reapply the deployment.
-
-### Exercise 3: Load Testing
-
-Test with your scaled deployment:
-
-
-
-```bash
-%%bash
-# Get node IP for benchmarking
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-# Run benchmark against scaled deployment
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://$NODE_IP:30100 \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency 8 \
-  --request-count 300
-
-echo ""
-echo "Compare this with your single-worker baseline!"
-```
-
-### Exercise 4: Cleanup
+### Cleanup
 
 When you're done with Lab 1, clean up your deployment:
 
 
-
 ```bash
-%%bash
-# Delete the deployment
-kubectl delete dynamographdeployment vllm-agg-router -n $NAMESPACE
+import subprocess
+import os
 
-echo ""
-echo "✓ Deployment deleted"
-echo "Verifying pods are terminating:"
-kubectl get pods -n $NAMESPACE
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Delete the deployment
+subprocess.run(['kubectl', 'delete', 'dynamographdeployment', 'vllm-agg-router', '-n', namespace])
+
+print("")
+print("✓ Deployment deleted")
+print("Verifying pods are terminating:")
+subprocess.run(['kubectl', 'get', 'pods', '-n', namespace])
 ```
 
 **Note:** Keep your namespace and platform for Lab 2! Only delete the deployment, not the namespace.
@@ -648,52 +867,74 @@ kubectl get pods -n $NAMESPACE
 ### Check Pod Status
 
 
-
 ```bash
-%%bash
-# Check all pods in your namespace
-kubectl get pods -n $NAMESPACE
+import subprocess
+import os
 
-# Describe a specific pod to see errors
-# Replace <pod-name> with actual pod name from above output
-# kubectl describe pod <pod-name> -n $NAMESPACE
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Check all pods in your namespace
+subprocess.run(['kubectl', 'get', 'pods', '-n', namespace])
+
+print("\n# To describe a specific pod to see errors:")
+print(f"# kubectl describe pod <pod-name> -n {namespace}")
 ```
 
 ### View Pod Logs
 
 
-
 ```bash
-%%bash
-# View logs from a specific component
-# For frontend:
-kubectl logs -l component=Frontend -n $NAMESPACE --tail=50
+import subprocess
+import os
 
-# For worker:
-kubectl logs -l component=VllmDecodeWorker -n $NAMESPACE --tail=50
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# View logs from a specific component
+print("Frontend logs:")
+subprocess.run(['kubectl', 'logs', '-l', 'component=Frontend', '-n', namespace, '--tail=50'])
+
+print("\nWorker logs:")
+subprocess.run(['kubectl', 'logs', '-l', 'component=VllmDecodeWorker', '-n', namespace, '--tail=50'])
 ```
 
 ### Check Deployment Status
 
 
-
 ```bash
-%%bash
-# Check DynamoGraphDeployment status
-kubectl describe dynamographdeployment vllm-agg-router -n $NAMESPACE
+import subprocess
+import os
 
-# Check operator logs
-kubectl logs -l app.kubernetes.io/name=dynamo-operator -n $NAMESPACE --tail=50
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
+# Check DynamoGraphDeployment status
+print("DynamoGraphDeployment status:")
+subprocess.run(['kubectl', 'describe', 'dynamographdeployment', 'vllm-agg-router', '-n', namespace])
+
+print("\nOperator logs:")
+subprocess.run(['kubectl', 'logs', '-l', 'app.kubernetes.io/name=dynamo-operator', '-n', namespace, '--tail=50'])
 ```
 
 ### Check Recent Events
 
 
-
 ```bash
-%%bash
+import subprocess
+import os
+
+namespace = os.environ.get('NAMESPACE', 'dynamo-lab1')
+
 # View recent events in your namespace
-kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
+result = subprocess.run(
+    ['kubectl', 'get', 'events', '-n', namespace, '--sort-by=.lastTimestamp'],
+    capture_output=True,
+    text=True
+)
+
+# Show last 20 lines
+lines = result.stdout.split('\n')
+for line in lines[-20:]:
+    if line:
+        print(line)
 ```
 
 ### Common Issues
@@ -708,7 +949,7 @@ kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
 ## Summary
 
 ### What You Learned
-- ✅ How to set up a Dynamo deployment on Kubernetes
+- ✅ How to set up a namespace-scoped Dynamo deployment on Kubernetes
 - ✅ Kubernetes-based aggregated deployment architecture
 - ✅ Creating and managing DynamoGraphDeployment resources
 - ✅ Backend engine deployment (vLLM)
@@ -716,11 +957,11 @@ kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
 - ✅ Performance benchmarking with AI-Perf
 
 ### Key Takeaways
+- Namespace-scoped operators enable safe multi-tenant deployments
 - Aggregated serving is simpler to deploy and suitable for single-node models
 - KV-cache routing provides intelligent load balancing across replicas
 - DynamoGraphDeployment CRD simplifies complex inference deployments
 - AI-Perf provides comprehensive performance insights
-- Single-node Kubernetes clusters are ideal for development and learning
 
 ### Next Steps
 - **(Optional)** Complete the **Monitoring Extension** (`lab1-monitoring.md`) to set up Prometheus and Grafana for observability
@@ -732,62 +973,32 @@ kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -20
 
 This appendix provides complete commands for each section. Use these as a reference during the lab.
 
-**Note for MicroK8s users:** Replace `kubectl` with `kubectl` in all commands below, or set up an alias:
-
+**Note for MicroK8s users:** Replace `kubectl` with `microk8s kubectl` in all commands below, or set up an alias:
 
 
 ```python
-%%python
-alias kubectl='kubectl'
+alias kubectl='microk8s kubectl'
 ```
 
 ### A1. Environment Setup
 
 
-
 ```python
-%%python
 # Verify kubectl is installed and configured
 kubectl version --client
 kubectl cluster-info
 
-# Set your configuration
-export NAMESPACE="dynamo-lab1"
-export RELEASE_VERSION="0.7.1"     # Dynamo version
-export CACHE_PATH="/data/huggingface-cache"  # Local cache path
+# Set your configuration (customize with your name!)
+export NAMESPACE="dynamo-yourname"  # Replace 'yourname' with your actual name
+export RELEASE_VERSION="0.5.0"     # Dynamo version
+export HF_TOKEN="your_hf_token"    # Your HuggingFace token
+export CACHE_PATH="/data/huggingface-cache"  # Shared cache path (ask instructor)
 
-# HuggingFace Token - Required for model downloads
-# Get your token from https://huggingface.co/settings/tokens
-export HF_TOKEN="your_hf_token"    # Replace with your HuggingFace token
-
-# NGC Authentication - Get and save NGC API key
-export NGC_API_KEY="your_ngc_api_key"  # Replace with your actual NGC API key from https://ngc.nvidia.com/
-
-# Login to NVIDIA Container Registry
-# Username: $oauthtoken (literal string)
-# Password: your NGC API key
-echo $NGC_API_KEY | helm registry login nvcr.io --username '$oauthtoken' --password-stdin
-
-# Create your namespace
+# Create your personal namespace
 kubectl create namespace ${NAMESPACE}
 
 # Verify namespace was created
 kubectl get namespace ${NAMESPACE}
-
-# Create NGC pull secret in the namespace
-kubectl create secret docker-registry ngc-secret \
-  --docker-server=nvcr.io \
-  --docker-username='$oauthtoken' \
-  --docker-password=$NGC_API_KEY \
-  --namespace ${NAMESPACE}
-
-# Verify NGC secret was created
-kubectl get secret ngc-secret -n ${NAMESPACE}
-
-# Create HuggingFace token secret
-kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="${HF_TOKEN}" \
-  --namespace ${NAMESPACE}
 
 # Check GPU nodes are available (optional)
 kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu
@@ -796,9 +1007,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nv
 ### A2. Install Dynamo Platform (Namespace-Scoped)
 
 
-
 ```python
-%%python
 # Step 1: Check if CRDs are already installed (cluster-wide)
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
@@ -812,9 +1021,11 @@ fi
 # Step 2: Download Dynamo platform helm chart
 helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-${RELEASE_VERSION}.tgz
 
-# Step 3: Install Dynamo platform (cluster-wide by default - recommended)
+# Step 3: Install namespace-scoped Dynamo platform
+# IMPORTANT: --set dynamo-operator.namespaceRestriction.enabled=true restricts operator to this namespace
 helm install dynamo-platform dynamo-platform-${RELEASE_VERSION}.tgz \
-  --namespace ${NAMESPACE}
+  --namespace ${NAMESPACE} \
+  --set dynamo-operator.namespaceRestriction.enabled=true
 
 # Step 4: Wait for platform pods to be ready (~2-3 minutes)
 echo "Waiting for platform pods to be ready..."
@@ -826,6 +1037,14 @@ kubectl wait --for=condition=ready pod \
 # Step 5: Verify platform is running
 kubectl get pods -n ${NAMESPACE}
 # You should see: dynamo-operator, etcd, and nats pods in Running state
+
+# Step 6: Create HuggingFace token secret
+kubectl create secret generic hf-token-secret \
+  --from-literal=HF_TOKEN="${HF_TOKEN}" \
+  --namespace ${NAMESPACE}
+
+# Verify secret was created
+kubectl get secret hf-token-secret -n ${NAMESPACE}
 ```
 
 ### A3. Deploy Your First Model
@@ -883,9 +1102,7 @@ spec:
 Deploy the model:
 
 
-
 ```python
-%%python
 # Apply the deployment
 kubectl apply -f agg_router.yaml --namespace ${NAMESPACE}
 
@@ -907,92 +1124,91 @@ kubectl logs ${WORKER_POD} -n ${NAMESPACE} --tail=50 --follow
 ### A4. Test the Deployment
 
 
+```bash
+import subprocess
 
-```python
-%%python
-# Forward the frontend service port (run in a separate terminal, or add & to background)
-kubectl port-forward deployment/vllm-agg-router-frontend 10000:8000 -n ${NAMESPACE}
-
-# In another terminal, test the deployment:
-
-# Test 1: Check available models
-curl http://localhost:10000/v1/models
-
-# Test 2: Simple non-streaming chat completion
-curl http://localhost:10000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Hello! How are you?"}],
-    "stream": false,
-    "max_tokens": 50
-  }'
-
-# Test 3: Streaming chat completion
-curl http://localhost:10000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Write a short poem about AI"}],
-    "stream": true,
-    "max_tokens": 100
-  }'
-
-# Test 4: With different parameters
-curl http://localhost:10000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}],
-    "stream": false,
-    "temperature": 0.7,
-    "max_tokens": 100,
-    "top_p": 0.9
-  }'
+# The frontend is exposed via NodePort on port 30100
+# Get the node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+print(f"Frontend URL: http://{node_ip}:30100")
+print("\nQuick test commands (run in terminal):\n")
+print(f"# Test 1: Check available models")
+print(f"curl http://{node_ip}:30100/v1/models\n")
+print(f"# Test 2: Simple chat completion")
+print(f"curl http://{node_ip}:30100/v1/chat/completions -H 'Content-Type: application/json' -d '{{\"model\": \"Qwen/Qwen2.5-1.5B-Instruct\", \"messages\": [{{\"role\": \"user\", \"content\": \"Hello!\"}}], \"stream\": false, \"max_tokens\": 50}}'")
 ```
 
 ### A5. Benchmark with AI-Perf
 
 
+```bash
+import subprocess
 
-```python
+# Get node IP
+result = subprocess.run(
+    ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[0].status.addresses[?(@.type=="InternalIP")].address}'],
+    capture_output=True,
+    text=True
+)
+node_ip = result.stdout.strip()
+frontend_url = f"http://{node_ip}:30100"
+
+print(f"Benchmarking frontend at: {frontend_url}\n")
+
 # Install AI-Perf (if not already installed)
-pip install aiperf
+subprocess.run(['pip', 'install', 'aiperf'], capture_output=True)
+
+print("=== Running benchmarks ===\n")
 
 # Run a simple benchmark (adjust parameters as needed)
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:10000 \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency 1 \
-  --request-count 100
+print("1. Low concurrency benchmark...")
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', frontend_url,
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--concurrency', '1',
+    '--request-count', '100'
+])
 
 # Run with higher concurrency
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:10000 \
-  --endpoint-type chat \
-  --streaming \
-  --concurrency 4 \
-  --request-count 200
+print("\n2. High concurrency benchmark...")
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', frontend_url,
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--concurrency', '4',
+    '--request-count', '200'
+])
 
 # Run with request rate
-aiperf profile \
-  --model Qwen/Qwen2.5-1.5B-Instruct \
-  --url http://localhost:10000 \
-  --endpoint-type chat \
-  --streaming \
-  --request-rate 10 \
-  --request-count 200
+print("\n3. Request rate benchmark...")
+subprocess.run([
+    'aiperf', 'profile',
+    '--log-level', 'warning',
+    '--model', 'Qwen/Qwen2.5-1.5B-Instruct',
+    '--url', frontend_url,
+    '--endpoint-type', 'chat',
+    '--streaming',
+    '--request-rate', '10',
+    '--request-count', '200'
+])
 ```
 
 ### A6. Scale Your Deployment
 
 
-
 ```python
-%%python
 # Edit your agg_router.yaml and change replicas from 1 to 2
 # Then reapply:
 kubectl apply -f agg_router.yaml --namespace ${NAMESPACE}
@@ -1008,9 +1224,7 @@ kubectl logs -l component=VllmDecodeWorker -n ${NAMESPACE} --tail=20
 ### A7. Cleanup
 
 
-
 ```python
-%%python
 # Delete the deployment
 kubectl delete dynamographdeployment vllm-agg-router -n ${NAMESPACE}
 
@@ -1025,9 +1239,7 @@ kubectl get pods -n ${NAMESPACE}
 ### A8. Troubleshooting
 
 
-
 ```python
-%%python
 # Check pod status
 kubectl get pods -n ${NAMESPACE}
 
@@ -1046,6 +1258,5 @@ kubectl logs -l app.kubernetes.io/name=dynamo-operator -n ${NAMESPACE}
 # Check if image pull is working
 kubectl get events -n ${NAMESPACE} --sort-by='.lastTimestamp'
 ```
-
 
 
