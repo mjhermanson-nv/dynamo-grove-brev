@@ -761,7 +761,7 @@ else:
 2. Copy and paste this command:
 
 ```bash
-cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh baseline
+cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh baseline
 ```
 
 This will run a low concurrency benchmark (1 concurrent request, 100 total requests) and display metrics including:
@@ -780,7 +780,7 @@ This will run a low concurrency benchmark (1 concurrent request, 100 total reque
 2. Copy and paste this command:
 
 ```bash
-cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh high
+cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh high
 ```
 
 This will run a high concurrency benchmark (4 concurrent requests, 200 total requests) to stress test the system and see how it handles multiple simultaneous users.
@@ -795,7 +795,7 @@ This will run a high concurrency benchmark (4 concurrent requests, 200 total req
 2. Copy and paste this command:
 
 ```bash
-cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh rate
+cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh rate
 ```
 
 This will run a request rate benchmark (10 requests per second, 200 total requests) to simulate a steady stream of users hitting the API at a controlled rate.

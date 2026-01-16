@@ -1,332 +1,210 @@
-# Dynamo + Grove Bootstrap Script for Brev
+# Dynamo Grove Workshops
 
-A one-shot bootstrap script to set up Kubernetes (microk8s) and deploy NVIDIA Dynamo with Grove on a Brev launchable instance. Perfect for single-node setups with GPU support (tested with 2x L40s GPUs).
+Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo with Grove on Kubernetes. These workshops guide you through deploying high-performance LLM inference workloads with monitoring and observability.
 
-## 🎯 What This Does
+## 📚 Workshops
 
-This script automates the complete setup of:
+### 01 - Dynamo Deployment Guide
+**File**: `01-dynamo-deployment-guide.ipynb`
 
-1. **Kubernetes Cluster** - Installs and configures microk8s
-2. **Essential Tools** - kubectl, helm, k9s
-3. **Storage Provisioning** - Local-path storage for PersistentVolumeClaims
-4. **NVIDIA GPU Support** - GPU operator for Kubernetes
-5. **Dynamo Platform** - Installs Dynamo CRDs and platform operator
-6. **Grove Setup** - Prepares Grove components for advanced features
+Learn how to deploy and manage LLM inference workloads using Dynamo on Kubernetes:
+- Set up your Kubernetes environment
+- Configure NGC and HuggingFace credentials
+- Install Dynamo platform and CRDs
+- Deploy disaggregated serving architectures (separate prefill/decode workers)
+- Perform rolling updates and horizontal scaling
+- Run benchmarks with AI-Perf
 
-## 📋 Prerequisites
+**Duration**: ~90 minutes
 
-- A Brev launchable instance (Ubuntu-based)
-- NVIDIA GPUs (tested with 2x L40s)
-- sudo/root access
-- Internet connectivity
-- NGC account access (for Dynamo Helm charts)
+### 02 - Monitoring and Observability
+**File**: `02-monitoring-and-observability.ipynb`
 
-### NGC Authentication
+Set up monitoring and observability for your Dynamo deployments:
+- Access cluster-wide Grafana and Prometheus
+- Configure PodMonitors for metrics collection
+- Import and view Dynamo inference dashboards
+- Analyze key metrics (TTFT, inter-token latency, throughput)
+- Create custom Prometheus queries and alerts
 
-Before running the script, ensure you have NGC access:
-
-```bash
-# Login to NGC Helm registry
-helm registry login nvcr.io
-```
-
-You'll need:
-- An NVIDIA NGC account: https://catalog.ngc.nvidia.com/
-- Access to the Dynamo Helm charts
+**Duration**: ~20 minutes
 
 ## 🚀 Quick Start
 
-### Step 1: Bootstrap Kubernetes
+### Prerequisites
+
+- A Kubernetes cluster with GPU support (tested on Brev with 2x L40s GPUs)
+- Access to NVIDIA NGC (for Dynamo Helm charts and container images)
+- Access to HuggingFace (for model downloads)
+
+### Option 1: Bootstrap from Scratch
+
+Use the included bootstrap script to set up everything:
 
 ```bash
-# Clone or download the repository
+# Clone the repository
 git clone https://github.com/mjhermanson-nv/dynamo-grove-brev.git
 cd dynamo-grove-brev
 
-# Make it executable
-chmod +x oneshot.sh
-
-# Run it (may require sudo)
+# Run the bootstrap (installs microk8s, kubectl, helm, k9s, GPU operator, storage, monitoring)
 sudo ./oneshot.sh
 ```
 
-Or run as root:
-```bash
-sudo bash oneshot.sh
-```
+The bootstrap script installs:
+- Kubernetes (microk8s)
+- Essential CLI tools (kubectl, helm, k9s)
+- NVIDIA GPU operator
+- Storage provisioning (local-path)
+- Prometheus & Grafana (cluster-wide monitoring)
 
-This will:
-- Install and configure microk8s
-- Set up kubectl, helm, and k9s
-- Configure GPU support
-- Set up storage provisioning
+### Option 2: Use an Existing Cluster
 
-### Step 2: Install Dynamo + Grove
-
-After the bootstrap completes, install Dynamo:
+If you already have a Kubernetes cluster with GPU support, you can jump straight into the workshops:
 
 ```bash
-# First, authenticate with NGC
-helm registry login nvcr.io
-# Username: $oauthtoken
-# Password: <your-ngc-api-key>
-
-# Then run the Dynamo installer
-./install-dynamo.sh
+# Start with the first notebook
+jupyter lab 01-dynamo-deployment-guide.ipynb
 ```
 
-The Dynamo installer will:
-- Prompt for NGC API key (for image pull secrets)
-- Install Dynamo CRDs and platform
-- Set up Grove components
-- Verify the installation
+## 📖 Workshop Structure
 
-## 📖 What Gets Installed
+Each workshop is provided in two formats:
+- **`.md`** - Markdown source (authoritative, use for editing)
+- **`.ipynb`** - Jupyter notebook (generated from markdown)
 
-### Kubernetes Components
-- **microk8s** - Lightweight Kubernetes distribution
-- **DNS addon** - CoreDNS for service discovery
-- **GPU addon** - NVIDIA GPU operator
-
-### CLI Tools
-- **kubectl** - Standalone binary in `/usr/local/bin/`
-- **helm** - Helm 3 for package management
-- **k9s** - Terminal UI for Kubernetes
-
-### Storage
-- **local-path-provisioner** - Dynamic storage provisioning
-- Set as default StorageClass for PVCs
-
-### Dynamo Components
-- **Dynamo CRDs** - Custom Resource Definitions
-- **Dynamo Platform** - Operator and core components
-- **Grove** - Advanced features (multinode, distributed KV cache)
-
-## 🎓 Tutorial: Deploying Your First Model
-
-After the script completes, you're ready to deploy models with Dynamo. Here's a quick tutorial:
-
-### 1. Set Up HuggingFace Token (if needed)
+The markdown format allows for better version control and easier editing. Use the sync script to update notebooks:
 
 ```bash
-export NAMESPACE=dynamo-system
-export HF_TOKEN=<your-huggingface-token>
-
-kubectl create secret generic hf-token-secret \
-  --from-literal=HF_TOKEN="$HF_TOKEN" \
-  -n ${NAMESPACE}
+cd resources
+./sync-notebooks.sh
 ```
 
-### 2. Choose Your Backend
+## 📁 Repository Structure
 
-Dynamo supports three backends:
-
-| Backend | Best For | Example Use Case |
-|---------|----------|------------------|
-| **vLLM** | General purpose, easy setup | Most models, quick deployments |
-| **SGLang** | High throughput, structured outputs | Tool calling, function calling |
-| **TensorRT-LLM** | Maximum performance | Production workloads, optimized inference |
-
-### 3. Deploy a Model
-
-For a 2x L40s setup, you can run:
-
-- **Aggregated**: 1 worker per GPU (2 workers total)
-- **Disaggregated**: Separate prefill/decode workers for higher throughput
-- **With Router**: Load balancing across workers
-
-Example deployment YAML (`my-model.yaml`):
-
-```yaml
-apiVersion: nvidia.com/v1alpha1
-kind: DynamoGraphDeployment
-metadata:
-  name: my-llm
-spec:
-  services:
-    Frontend:
-      dynamoNamespace: my-llm
-      componentType: frontend
-      replicas: 1
-    VllmDecodeWorker:
-      dynamoNamespace: my-llm
-      componentType: worker
-      replicas: 2  # One per GPU
-      envFromSecret: hf-token-secret
-      resources:
-        limits:
-          gpu: "1"
-      extraPodSpec:
-        mainContainer:
-          image: nvcr.io/nvidia/dynamo/dynamo-runtime:latest
-          args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-0.5B
+```
+dynamo-grove-brev/
+├── 01-dynamo-deployment-guide.md/.ipynb     # Workshop 1: Deployment
+├── 02-monitoring-and-observability.md/.ipynb # Workshop 2: Monitoring
+├── oneshot.sh                                # Bootstrap script
+├── resources/                                # Supporting files
+│   ├── run-benchmark.sh                      # AI-Perf benchmark wrapper
+│   ├── dynamo-inference-dashboard.json       # Grafana dashboard
+│   ├── disagg_router.yaml                    # Example deployment config
+│   ├── sync-notebooks.sh                     # Markdown to notebook sync
+│   ├── NOTEBOOK-WORKFLOW.md                  # Development workflow
+│   └── QUICK-REFERENCE.md                    # Quick command reference
+└── examples/                                 # Additional examples
 ```
 
-Deploy it:
+## 🎯 What You'll Learn
 
-```bash
-kubectl apply -f my-model.yaml -n dynamo-system
-```
+### Workshop 1 Skills
+- Kubernetes fundamentals for ML workloads
+- Dynamo architecture and components
+- Disaggregated serving patterns
+- Deployment strategies (rolling updates, scaling)
+- Performance benchmarking with AI-Perf
 
-### 4. Monitor Your Deployment
-
-```bash
-# Check deployment status
-kubectl get dynamoGraphDeployment -n dynamo-system
-
-# Watch pods
-kubectl get pods -n dynamo-system -w
-
-# View logs
-kubectl logs -n dynamo-system <pod-name>
-```
-
-### 5. Test Your Model
-
-```bash
-# Port forward to the frontend service
-kubectl port-forward svc/<your-frontend-service> 8000:8000 -n dynamo-system
-
-# In another terminal, test the API
-curl http://localhost:8000/v1/models
-```
+### Workshop 2 Skills
+- Prometheus metrics collection and querying
+- Grafana dashboard creation and analysis
+- Key LLM inference metrics (TTFT, ITL, throughput)
+- Performance monitoring and alerting
+- Troubleshooting inference workloads
 
 ## 🏗️ Architecture Patterns
 
 ### Aggregated Serving
 - Single worker handles both prefill and decode
 - Simple setup, good for development
-- Use: `examples/backends/vllm/deploy/agg.yaml`
+- Lower resource requirements
 
-### Aggregated + Router
-- Multiple workers with load balancing
-- Better throughput, fault tolerance
-- Use: `examples/backends/vllm/deploy/agg_router.yaml`
-
-### Disaggregated + Router
+### Disaggregated Serving
 - Separate prefill and decode workers
-- Maximum throughput, optimal resource usage
-- Use: `examples/backends/vllm/deploy/disagg_router.yaml`
+- Maximum throughput and resource efficiency
+- Scales prefill and decode independently
+- Covered in Workshop 1
 
-## 📚 Resources
-
-- **Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/kubernetes/README.html
-- **Dynamo Examples**: https://github.com/ai-dynamo/dynamo/tree/main/examples/backends
-- **Grove Documentation**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/index.html
-- **API Reference**: https://docs.nvidia.com/dynamo/latest/kubernetes/api-reference/index.html
+### Monitoring Stack
+- Cluster-wide Prometheus for metrics collection
+- Grafana for visualization and dashboards
+- PodMonitors for automatic discovery
+- Covered in Workshop 2
 
 ## 🔧 Troubleshooting
 
-### kubectl not working
-
-The script installs standalone binaries that work immediately. If you have issues:
+### Jupyter Issues
 
 ```bash
-export KUBECONFIG=$HOME/.kube/config
-kubectl get nodes
+# If notebooks don't open, ensure Jupyter is installed
+pip install jupyterlab jupytext
+
+# Launch Jupyter
+jupyter lab
 ```
 
-### NGC Authentication Issues
+### Kubernetes Issues
 
 ```bash
-# Verify NGC login
+# Verify cluster is running
+kubectl get nodes
+kubectl get pods -A
+
+# Check GPU availability
+kubectl get nodes -o json | jq '.items[].status.allocatable | ."nvidia.com/gpu"'
+```
+
+### NGC Authentication
+
+```bash
+# Login to NGC
 helm registry login nvcr.io
 # Username: $oauthtoken
 # Password: <your-ngc-api-key>
 
-# Check available versions
-# Visit: https://github.com/ai-dynamo/dynamo/releases
-
-# If you see ImagePullBackOff errors, create image pull secret:
-kubectl create secret docker-registry ngc-registry-secret \
+# Create pull secret for pods
+kubectl create secret docker-registry ngc-secret \
   --docker-server=nvcr.io \
   --docker-username='$oauthtoken' \
   --docker-password=<your-ngc-api-key> \
-  --docker-email=<your-email> \
-  -n dynamo-system
-
-# Patch service account to use it:
-kubectl patch serviceaccount default -n dynamo-system \
-  -p '{"imagePullSecrets":[{"name":"ngc-registry-secret"}]}'
+  --namespace dynamo
 ```
 
-### GPU Not Detected
+### Grafana Access
 
-```bash
-# Check GPU availability
-nvidia-smi
+Grafana is exposed via NodePort on the cluster. The notebooks will show you how to access it at `https://grafana0-{hostname}.brevlab.com/` (or your cluster's equivalent).
 
-# Verify GPU operator
-kubectl get pods -n gpu-operator-resources
-```
+## 📚 Resources
 
-### Storage Issues
-
-```bash
-# Check storage class
-kubectl get storageclass
-
-# Verify local-path-provisioner
-kubectl get pods -n local-path-storage
-```
-
-### Dynamo Platform Not Ready
-
-```bash
-# Check operator status
-kubectl get pods -n dynamo-system
-
-# View operator logs (note the correct deployment name)
-kubectl logs -n dynamo-system deployment/dynamo-platform-dynamo-operator-controller-manager
-
-# Check all resources
-kubectl get all -n dynamo-system
-```
+- **Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
+- **Dynamo GitHub**: https://github.com/ai-dynamo/dynamo
+- **Grove Documentation**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/
+- **NGC Catalog**: https://catalog.ngc.nvidia.com/
+- **AI-Perf**: https://github.com/triton-inference-server/perf_analyzer
 
 ## 💡 Tips
 
-- **No group membership needed**: The script installs standalone binaries, so you don't need to logout/login or use `newgrp`
-- **Works immediately**: kubectl, helm, and k9s are available right after the script completes
-- **Single-node optimized**: Perfect for development and testing on Brev instances
-- **Grove ready**: While Grove is primarily for multinode, the setup prepares you for scaling
-
-## 🎯 Quick Commands Reference
-
-```bash
-# Cluster info
-kubectl get nodes
-kubectl get pods -A
-kubectl get storageclass
-
-# Dynamo deployments
-kubectl get dynamoGraphDeployment -n dynamo-system
-kubectl describe dynamoGraphDeployment <name> -n dynamo-system
-
-# Monitoring
-k9s  # Terminal UI
-kubectl logs -n dynamo-system <pod-name> -f
-
-# Port forwarding
-kubectl port-forward svc/<service-name> 8000:8000 -n dynamo-system
-```
-
-## 📝 Notes
-
-- The script is idempotent - safe to run multiple times
-- All tools are installed to `/usr/local/bin/` for system-wide access
-- Kubeconfig is stored at `~/.kube/config`
-- Default namespace is `dynamo-system`
+- **Start with Workshop 1**: It sets up the foundation for Workshop 2
+- **Run benchmarks in terminals**: Heavy workloads can crash notebook kernels
+- **Use markdown for editing**: Better version control and easier collaboration
+- **Keep notebooks clean**: Restart kernel and clear outputs before committing
+- **Check logs**: Use `kubectl logs` to troubleshoot deployment issues
 
 ## 🤝 Contributing
 
-Feel free to open issues or submit pull requests for improvements!
+Contributions are welcome! To maintain consistency:
+
+1. Edit the `.md` files (not `.ipynb`)
+2. Run `./resources/sync-notebooks.sh` to update notebooks
+3. Test your changes in Jupyter
+4. Submit a pull request
+
+See `resources/NOTEBOOK-WORKFLOW.md` for development guidelines.
 
 ## 📄 License
 
-This script is provided as-is for setting up Dynamo on Brev instances.
+This workshop is provided as-is for learning and deploying Dynamo on Kubernetes.
 
 ---
 
-**Happy deploying! 🚀**
-
+**Happy learning! 🚀**
