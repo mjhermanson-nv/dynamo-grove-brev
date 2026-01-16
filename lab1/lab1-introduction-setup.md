@@ -3,7 +3,7 @@ jupyter:
   jupytext:
     cell_metadata_filter: -all
     formats: ipynb,md
-    main_language: bash
+    main_language: python
     notebook_metadata_filter: jupytext,-kernelspec,-widgets,-language_info
     text_representation:
       extension: .md
@@ -47,7 +47,6 @@ Set your configuration variables. **Replace the values below with your own:**
 
 
 ```bash
-%%bash
 # Set environment variables (use defaults if not already set)
 export RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
 export NAMESPACE=${NAMESPACE:-dynamo}
@@ -76,7 +75,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 
 ```bash
-%%bash
 # Verify kubectl is installed and configured
 echo "=== kubectl version ==="
 kubectl version --client
@@ -102,40 +100,53 @@ To access NVIDIA's Dynamo container images, you need to authenticate with NGC (N
 4. Select **"Setup"** → **"Generate API Key"**
 5. Copy your API key (it will only be shown once!)
 
-#### Login to NGC Container Registry
+#### Set NGC API Key
 
 **Get your NGC API Key from [ngc.nvidia.com](https://ngc.nvidia.com/)** (Go to Profile > Setup > Generate API Key)
 
-```bash
-%%bash
-# Enter your NGC API Key when prompted
-read -sp "NGC API Key: " NGC_API_KEY
-echo ""
-export NGC_API_KEY
+```python
+import os
+import getpass
 
-echo ""
-echo "✓ NGC API key saved"
-echo "  You can now use it to login and create pull secrets"
+# Get NGC API key from user
+print("Enter your NGC API Key from https://ngc.nvidia.com/")
+print("(Go to Profile > Setup > Generate API Key)")
+print("")
+NGC_API_KEY = getpass.getpass("NGC API Key: ")
+
+# Save it for later use (creating pull secrets)
+os.environ['NGC_API_KEY'] = NGC_API_KEY
+
+print("")
+print("✓ NGC API key saved")
+print("  You can now use it to login and create pull secrets")
 ```
 
 #### Set HuggingFace Token
 
 **HuggingFace token is required to download models.** Get yours from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (Create a 'Read' token if you don't have one)
 
-```bash
-%%bash
-# Enter your HuggingFace token when prompted
-read -sp "HF Token: " HF_TOKEN
-echo ""
-export HF_TOKEN
+```python
+import os
+import getpass
 
-echo "✓ HuggingFace token saved to environment"
+# Get HuggingFace token from user
+print("Enter your HuggingFace Token from https://huggingface.co/settings/tokens")
+print("(Create a 'Read' token if you don't have one)")
+print("")
+HF_TOKEN = getpass.getpass("HF Token: ")
+
+# Save it for later use
+os.environ['HF_TOKEN'] = HF_TOKEN
+
+print("")
+print("✓ HuggingFace token saved to environment")
+print("  Available as $HF_TOKEN in bash cells")
 ```
 
 #### Login to NGC Registry
 
 ```bash
-%%bash
 # Login to NGC container registry
 echo "$NGC_API_KEY" | helm registry login nvcr.io --username '$oauthtoken' --password-stdin
 
@@ -147,7 +158,6 @@ echo "  You can now pull Dynamo container images"
 ### Step 5: Create Your Namespace
 
 ```bash
-%%bash
 # Create the namespace
 NAMESPACE=${NAMESPACE:-dynamo}
 
@@ -164,7 +174,6 @@ kubectl get namespace $NAMESPACE
 Create a Kubernetes secret so that pods can pull images from NGC.
 
 ```bash
-%%bash
 # Get variables
 NAMESPACE=${NAMESPACE:-dynamo}
 
@@ -186,7 +195,6 @@ echo "✓ NGC pull secret created in namespace: $NAMESPACE"
 ### Step 7: Create HuggingFace Token Secret
 
 ```bash
-%%bash
 # Get variables
 NAMESPACE=${NAMESPACE:-dynamo}
 
@@ -241,7 +249,6 @@ We're using the **recommended cluster-wide deployment** (default). According to 
 
 
 ```bash
-%%bash
 # Check if CRDs already exist
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
@@ -258,7 +265,6 @@ fi
 
 
 ```bash
-%%bash
 # Install Dynamo CRDs (only if not already installed)
 RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
 
@@ -277,7 +283,6 @@ This installs ETCD, NATS, and the Dynamo Operator Controller (cluster-wide by de
 
 
 ```bash
-%%bash
 RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
 NAMESPACE=${NAMESPACE:-dynamo}
 
@@ -301,7 +306,6 @@ Re-run the following cell until all pods report as "Running"
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Waiting for platform pods to be ready..."
@@ -407,7 +411,6 @@ Before deploying, we need to update the YAML configuration with your specific va
 
 
 ```bash
-%%bash
 # Update disagg_router.yaml with your configuration
 
 # Replace my-tag with actual version
@@ -426,7 +429,6 @@ grep "image:" disagg_router.yaml
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Apply the deployment
@@ -443,7 +445,6 @@ echo "  - Loading model into GPU memory"
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Expected pods:"
@@ -498,7 +499,6 @@ fi
 If your pods are in `Error` or `CrashLoopBackOff` state, run this cell to diagnose:
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "=== Pod Status ==="
@@ -547,7 +547,6 @@ While waiting for the deployment, you can watch the model loading progress in bo
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Get logs from worker pods
@@ -629,7 +628,6 @@ Now that your deployment is running, let's understand when and why disaggregated
 We're using disaggregated serving with a small model (1.5B) primarily for **educational purposes** to demonstrate the architecture pattern. In production, you would typically use aggregated serving for models this size.
 
 ```bash
-%%bash
 # Get the node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -644,7 +642,6 @@ echo "✓ Access the frontend at: http://$NODE_IP:30100"
 
 
 ```bash
-%%bash
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -656,7 +653,6 @@ curl http://$NODE_IP:30100/v1/models
 
 
 ```bash
-%%bash
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -675,7 +671,6 @@ curl http://$NODE_IP:30100/v1/chat/completions \
 
 
 ```bash
-%%bash
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -694,7 +689,6 @@ curl http://$NODE_IP:30100/v1/chat/completions \
 
 
 ```bash
-%%bash
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
@@ -734,84 +728,77 @@ You'll run AI-Perf from your local machine against the port-forwarded service, s
 ### Step 1: Install AI-Perf (if not already installed)
 
 
-```bash
-%%bash
-# Install AI-Perf benchmarking tool
-!uv pip install aiperf -q
-print("✓ AI-Perf installed")
+```python
+import subprocess
+import sys
+
+# Ensure pip is available in the venv
+print("Setting up pip in venv...")
+subprocess.run([sys.executable, "-m", "ensurepip", "--default-pip"], 
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+# Install AI-Perf in the venv
+print("Installing AI-Perf...")
+result = subprocess.run([sys.executable, "-m", "pip", "install", "aiperf", "-q"])
+
+if result.returncode == 0:
+    print("✓ AI-Perf installed successfully")
+    # Verify aiperf can be imported
+    verify = subprocess.run([sys.executable, "-c", "import aiperf"], capture_output=True)
+    if verify.returncode == 0:
+        print("  aiperf is ready to use")
+else:
+    print("⚠️  Installation had issues, but may still work")
 ```
 
 ### Step 2: Run Baseline Benchmark (Low Concurrency)
 
+**⚠️ IMPORTANT: Run benchmarks in a TERMINAL, not in notebook cells (aiperf can crash the kernel).**
+
+**To run this benchmark:**
+
+1. Open a new terminal (File → New → Terminal in JupyterLab)
+2. Copy and paste this command:
 
 ```bash
-%%bash
-# Get node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-echo "Running low concurrency benchmark..."
-
-# Run a simple benchmark with low concurrency
-aiperf profile \
-    --log-level warning \
-    --model Qwen/Qwen2.5-1.5B-Instruct \
-    --url http://$NODE_IP:30100 \
-    --endpoint-type chat \
-    --streaming \
-    --concurrency 1 \
-    --request-count 100
-
-echo ""
-echo "✓ Baseline benchmark complete"
+cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh baseline
 ```
+
+This will run a low concurrency benchmark (1 concurrent request, 100 total requests) and display metrics including:
+- Time to First Token (TTFT)
+- Token throughput
+- Request latency
+- Percentile distributions (p50, p90, p99)
 
 ### Step 3: Run Benchmark with Higher Concurrency
 
+**⚠️ IMPORTANT: Run benchmarks in a TERMINAL, not in notebook cells.**
+
+**To run this benchmark:**
+
+1. Open a new terminal (File → New → Terminal in JupyterLab)
+2. Copy and paste this command:
 
 ```bash
-%%bash
-# Get node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-echo "Running high concurrency benchmark..."
-
-# Test with higher concurrency to stress test
-aiperf profile \
-    --log-level warning \
-    --model Qwen/Qwen2.5-1.5B-Instruct \
-    --url http://$NODE_IP:30100 \
-    --endpoint-type chat \
-    --streaming \
-    --concurrency 4 \
-    --request-count 200
-
-echo ""
-echo "✓ High concurrency benchmark complete"
+cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh high
 ```
+
+This will run a high concurrency benchmark (4 concurrent requests, 200 total requests) to stress test the system and see how it handles multiple simultaneous users.
 
 ### Step 4: Run Benchmark with Request Rate
 
+**⚠️ IMPORTANT: Run benchmarks in a TERMINAL, not in notebook cells.**
+
+**To run this benchmark:**
+
+1. Open a new terminal (File → New → Terminal in JupyterLab)
+2. Copy and paste this command:
 
 ```bash
-%%bash
-# Get node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-echo "Running request rate benchmark..."
-
-# Test with request rate instead of concurrency
-aiperf profile \
-    --log-level warning \
-    --model Qwen/Qwen2.5-1.5B-Instruct \
-    --url http://$NODE_IP:30100 \
-    --endpoint-type chat \
-    --streaming \
-    --request-rate 10 \
-    --request-count 200
-
-echo ""
-echo "✓ Request rate benchmark complete"
+cd ~/dynamo-grove-brev/lab1 && ./run-benchmark.sh rate
 ```
+
+This will run a request rate benchmark (10 requests per second, 200 total requests) to simulate a steady stream of users hitting the API at a controlled rate.
 
 ### Step 5: Analyze Results
 
@@ -829,7 +816,6 @@ When you're done with Lab 1, clean up your deployment:
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Delete the deployment
@@ -849,7 +835,6 @@ kubectl get pods -n $NAMESPACE
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Check all pods in your namespace
@@ -864,7 +849,6 @@ echo "# kubectl describe pod <pod-name> -n $NAMESPACE"
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # View logs from a specific component
@@ -880,7 +864,6 @@ kubectl logs -l component=VllmDecodeWorker -n $NAMESPACE --tail=50
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Check DynamoGraphDeployment status
@@ -896,7 +879,6 @@ kubectl logs -l app.kubernetes.io/name=dynamo-operator -n $NAMESPACE --tail=50
 
 
 ```bash
-%%bash
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # View recent events in your namespace
@@ -943,7 +925,6 @@ This appendix provides complete commands for each section. Use these as a refere
 
 
 ```bash
-%%bash
 alias kubectl='microk8s kubectl'
 ```
 
@@ -951,7 +932,6 @@ alias kubectl='microk8s kubectl'
 
 
 ```bash
-%%bash
 # Verify kubectl is installed and configured
 kubectl version --client
 kubectl cluster-info
@@ -976,7 +956,6 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nv
 
 
 ```bash
-%%bash
 # Step 1: Check if CRDs are already installed (cluster-wide)
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
@@ -1108,7 +1087,6 @@ Deploy the model:
 
 
 ```bash
-%%bash
 # Apply the deployment
 kubectl apply -f disagg_router.yaml --namespace ${NAMESPACE}
 
@@ -1131,7 +1109,6 @@ kubectl logs ${WORKER_POD} -n ${NAMESPACE} --tail=50 --follow
 
 
 ```bash
-%%bash
 # The frontend is exposed via NodePort on port 30100
 # Get the node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
@@ -1151,7 +1128,6 @@ echo "curl http://$NODE_IP:30100/v1/chat/completions -H 'Content-Type: applicati
 
 
 ```bash
-%%bash
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 FRONTEND_URL="http://$NODE_IP:30100"
@@ -1184,7 +1160,6 @@ aiperf profile     --log-level warning     --model Qwen/Qwen2.5-1.5B-Instruct   
 
 
 ```bash
-%%bash
 # Edit your disagg_router.yaml and change replicas from 1 to 2
 # Then reapply:
 kubectl apply -f disagg_router.yaml --namespace ${NAMESPACE}
@@ -1201,7 +1176,6 @@ kubectl logs -l component=VllmDecodeWorker -n ${NAMESPACE} --tail=20
 
 
 ```bash
-%%bash
 # Delete the deployment
 kubectl delete dynamographdeployment vllm-disagg-router -n ${NAMESPACE}
 
@@ -1217,7 +1191,6 @@ kubectl get pods -n ${NAMESPACE}
 
 
 ```bash
-%%bash
 # Check pod status
 kubectl get pods -n ${NAMESPACE}
 
