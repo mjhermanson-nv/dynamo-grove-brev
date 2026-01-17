@@ -1,6 +1,8 @@
 # Dynamo on Brev
 
-Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo on Kubernetes. These guides walk you through deploying high-performance LLM inference workloads with monitoring and observability.
+Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo on Kubernetes using [Brev](https://brev.dev). These guides walk you through deploying high-performance LLM inference workloads with monitoring and observability.
+
+**Note**: These guides are designed for Brev environments with automatic Grafana tunneling and pre-configured networking. They may require modifications for other Kubernetes platforms.
 
 ## 📚 Guides
 
@@ -48,9 +50,11 @@ Learn distributed serving concepts with Grove:
 
 ### Prerequisites
 
-- A Kubernetes cluster with GPU support (tested on Brev with 2x L40s GPUs)
+- A Brev workspace with GPU support (tested with 2x L40s GPUs)
 - Access to NVIDIA NGC (for Dynamo Helm charts and container images)
 - Access to HuggingFace (for model downloads)
+
+**Note**: These guides use Brev-specific features like Grafana tunneling (`https://grafana0-{hostname}.brevlab.com/`). Adapting to other platforms will require modifying networking configurations.
 
 ### Bootstrap from Scratch
 
@@ -108,55 +112,6 @@ dynamo-grove-brev/
 │   └── QUICK-REFERENCE.md                    # Quick command reference
 └── README.md                                 # This file
 ```
-
-## 🎯 What You'll Learn
-
-### Guide 1 Skills
-- Kubernetes fundamentals for ML workloads
-- NGC authentication and container image access
-- Dynamo platform installation and CRDs
-- Disaggregated serving architecture (prefill/decode separation)
-- OpenAI-compatible API testing
-- Performance benchmarking with AI-Perf
-
-### Guide 2 Skills
-- Prometheus metrics collection with PodMonitors
-- Grafana dashboard deployment and configuration
-- Key LLM inference metrics: TTFT, ITL, throughput
-- Performance monitoring and analysis
-- Prometheus alerting rules
-- Load generation and metric visualization
-
-### Guide 3 Skills
-- Distributed systems architecture patterns
-- NATS message bus and pub/sub patterns
-- etcd coordination and service discovery
-- Multi-frontend load balancing strategies
-- NIXL distributed KV cache system
-- Grove-enabled deployment configuration
-- Real-time distributed metrics analysis
-- Multi-node serving strategies and trade-offs
-
-## 🏗️ Architecture Patterns
-
-### Disaggregated Serving (Guide 1)
-- Separate prefill and decode workers
-- Maximum throughput and resource efficiency
-- Scales prefill and decode independently
-- Deployed using DynamoGraphDeployment CRD
-
-### Monitoring Stack (Guide 2)
-- Cluster-wide Prometheus for metrics collection
-- Grafana for visualization and dashboards
-- PodMonitors for automatic service discovery
-- Pre-configured dashboards for Dynamo inference metrics
-
-### Distributed Serving (Guide 3)
-- NATS message bus for request routing and cache sharing
-- etcd for service discovery and coordination
-- Multi-frontend load balancing with Kubernetes Services
-- NIXL distributed KV cache across workers
-- Optimized for multi-node deployments
 
 ## 🔧 Troubleshooting
 
