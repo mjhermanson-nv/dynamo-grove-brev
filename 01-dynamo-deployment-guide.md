@@ -760,7 +760,7 @@ else:
 1. Open a new terminal (File → New → Terminal in JupyterLab)
 2. Copy and paste this command:
 
-```bash
+```
 cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh baseline
 ```
 
@@ -779,7 +779,7 @@ This will run a low concurrency benchmark (1 concurrent request, 100 total reque
 1. Open a new terminal (File → New → Terminal in JupyterLab)
 2. Copy and paste this command:
 
-```bash
+```
 cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh high
 ```
 
@@ -794,7 +794,7 @@ This will run a high concurrency benchmark (4 concurrent requests, 200 total req
 1. Open a new terminal (File → New → Terminal in JupyterLab)
 2. Copy and paste this command:
 
-```bash
+```
 cd ~/dynamo-grove-brev/resources && ./run-benchmark.sh rate
 ```
 

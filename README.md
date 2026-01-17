@@ -1,8 +1,8 @@
-# Dynamo Grove Workshops
+# Dynamo on Brev
 
-Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo with Grove on Kubernetes. These workshops guide you through deploying high-performance LLM inference workloads with monitoring and observability.
+Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo on Kubernetes. These guides walk you through deploying high-performance LLM inference workloads with monitoring and observability.
 
-## 📚 Workshops
+## 📚 Guides
 
 ### 01 - Dynamo Deployment Guide
 **File**: `01-dynamo-deployment-guide.ipynb`
@@ -28,6 +28,21 @@ Set up monitoring and observability for your Dynamo deployments:
 - Create custom Prometheus queries and alerts
 
 **Duration**: ~20 minutes
+
+### 03 - Distributed Serving with Grove
+**File**: `03-grove-distributed-serving.ipynb`
+
+Learn distributed serving concepts with Grove:
+- Understand Grove architecture (NATS, etcd, NIXL)
+- Deploy distributed coordination infrastructure
+- Create Grove-enabled Dynamo deployments
+- Monitor NATS and etcd with Grafana dashboards
+- Generate traffic and observe distributed metrics
+- Understand single-node vs multi-node trade-offs
+- Learn when to use Grove in production
+
+**Duration**: ~45 minutes  
+**Note**: Teaches distributed systems concepts using a single-node setup for learning
 
 ## 🚀 Quick Start
 
@@ -83,12 +98,14 @@ cd resources
 
 ```
 dynamo-grove-brev/
-├── 01-dynamo-deployment-guide.md/.ipynb     # Workshop 1: Deployment
-├── 02-monitoring-and-observability.md/.ipynb # Workshop 2: Monitoring
+├── 01-dynamo-deployment-guide.md/.ipynb      # Guide 1: Deployment
+├── 02-monitoring-and-observability.md/.ipynb # Guide 2: Monitoring
+├── 03-grove-distributed-serving.md/.ipynb    # Guide 3: Grove (optional)
 ├── oneshot.sh                                # Bootstrap script
 ├── resources/                                # Supporting files
 │   ├── run-benchmark.sh                      # AI-Perf benchmark wrapper
-│   ├── dynamo-inference-dashboard.json       # Grafana dashboard
+│   ├── dynamo-inference-dashboard.json       # Grafana dashboard (Dynamo metrics)
+│   ├── nats-overview-dashboard.json          # Grafana dashboard (NATS metrics)
 │   ├── disagg_router.yaml                    # Example deployment config
 │   ├── sync-notebooks.sh                     # Markdown to notebook sync
 │   ├── NOTEBOOK-WORKFLOW.md                  # Development workflow
@@ -98,19 +115,28 @@ dynamo-grove-brev/
 
 ## 🎯 What You'll Learn
 
-### Workshop 1 Skills
+### Guide 1 Skills
 - Kubernetes fundamentals for ML workloads
 - Dynamo architecture and components
 - Disaggregated serving patterns
 - Deployment strategies (rolling updates, scaling)
 - Performance benchmarking with AI-Perf
 
-### Workshop 2 Skills
+### Guide 2 Skills
 - Prometheus metrics collection and querying
 - Grafana dashboard creation and analysis
 - Key LLM inference metrics (TTFT, ITL, throughput)
 - Performance monitoring and alerting
 - Troubleshooting inference workloads
+
+### Guide 3 Skills (Optional)
+- Distributed systems architecture (NATS, etcd, message bus patterns)
+- NATS message bus and etcd coordination
+- NIXL distributed KV cache system
+- Grove-enabled deployment configuration
+- Real-time metrics analysis with Prometheus/Grafana
+- Multi-node serving strategies
+- Production scaling considerations
 
 ## 🏗️ Architecture Patterns
 
@@ -178,7 +204,6 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 
 - **Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
 - **Dynamo GitHub**: https://github.com/ai-dynamo/dynamo
-- **Grove Documentation**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/
 - **NGC Catalog**: https://catalog.ngc.nvidia.com/
 - **AI-Perf**: https://github.com/triton-inference-server/perf_analyzer
 

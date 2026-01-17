@@ -28,7 +28,7 @@ if [ "$(id -u)" -eq 0 ] || [ "${USER:-}" = "root" ]; then
     export HOME="/home/$DETECTED_USER"
 fi
 
-echo "☸️  Setting up Kubernetes with Dynamo + Grove..."
+echo "☸️  Setting up Kubernetes with Dynamo..."
 echo "User: $USER"
 
 # Install microk8s
@@ -337,7 +337,7 @@ data:
           "type": "stat",
           "title": "CPU (%)",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "targets": [{ "expr": "nats_server_cpu", "refId": "A" }],
+          "targets": [{ "expr": "nats_varz_cpu", "refId": "A" }],
           "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
         },
         {
@@ -353,7 +353,8 @@ data:
       ],
       "schemaVersion": 36,
       "title": "NATS Overview",
-      "version": 1,
+      "uid": "04a62f8c-0edb-4cbc-911d-4618788b3189",
+      "version": 2,
       "refresh": "30s",
       "timezone": "browser"
     }
@@ -459,6 +460,9 @@ EOF
 # Wait for Grafana to be ready
 kubectl wait --for=condition=available --timeout=180s deployment/kube-prometheus-stack-grafana -n monitoring
 
+echo "✓ Grove dashboards pre-configured in Grafana"
+echo "  (NATS and etcd will be installed in Lab 3)"
+
 # Final permission fix for any files created by microk8s
 if [ "$(id -u)" -eq 0 ] && [ -d "$HOME/.kube" ]; then
     chown -R $USER:$USER "$HOME/.kube" 2>/dev/null || true
@@ -492,7 +496,7 @@ echo "Verifying storage class..."
 kubectl get storageclass
 
 echo ""
-echo "✅ Kubernetes ready for Dynamo + Grove!"
+echo "✅ Kubernetes ready for Dynamo!"
 echo ""
 echo "Kubeconfig: ~/.kube/config"
 echo ""
@@ -507,23 +511,19 @@ echo "💡 How it works:"
 echo "  - kubectl, helm, k9s are standalone binaries (/usr/local/bin/)"
 echo "  - uv (fast Python package installer) installed to ~/.cargo/bin/"
 echo "  - Use ~/.kube/config automatically"
-echo "  - Storage provisioner ready for Dynamo/Grove PVCs"
+echo "  - Storage provisioner ready for Dynamo PVCs"
 echo "  - Grafana available via NodePort on 30080"
 echo "  - No group membership needed!"
 echo "  - No 'newgrp' or logout required!"
 echo ""
 echo "Grafana access:"
 echo "  URL: http://<node-ip>:30080"
-echo "  Login: disabled (anonymous Viewer access enabled)"
-echo "  User: admin (if you re-enable login)"
-echo "  Password: $GRAFANA_ADMIN_PASSWORD"
+echo "  Anonymous access enabled (no login required)"
 echo "  Hint: get node IPs with 'kubectl get nodes -o wide'"
 echo ""
-echo "Kubernetes Dashboard access:"
-echo "  URL: https://<node-ip>:30443"
-echo "  Token saved in: ~/.kube/dashboard-token"
-echo "  Or get token: kubectl describe secret -n kube-system microk8s-dashboard-token"
-echo "  Note: Use HTTPS, not HTTP!"
+echo "Grove (Lab 3):"
+echo "  Dashboards pre-configured: NATS Overview, etcd Overview"
+echo "  Components will be installed when you run Lab 3"
 echo ""
 echo "Next steps:"
 echo "  1. Set up NGC authentication (required for Dynamo container images):"
@@ -532,29 +532,9 @@ echo "     Then run: helm registry login nvcr.io"
 echo "     Username: \$oauthtoken"
 echo "     Password: <your NGC API key>"
 echo ""
-echo "  2. Install Dynamo + Grove:"
-echo "     ./install-dynamo.sh"
+echo "  2. Start the guides:"
+echo "     jupyter lab"
+echo "     Then open: 01-dynamo-deployment-guide.ipynb"
 echo ""
-echo "  3. Or follow the README.md for detailed instructions"
-echo ""
-echo "💡 Exposing services via NodePort:"
-echo "  When deploying applications, you can expose them via NodePort (like Grafana on 30080)"
-echo "  Example for Dynamo frontend on port 30100:"
-echo "    kubectl apply -f - <<EOF"
-echo "    apiVersion: v1"
-echo "    kind: Service"
-echo "    metadata:"
-echo "      name: frontend-nodeport"
-echo "      namespace: <your-namespace>"
-echo "    spec:"
-echo "      type: NodePort"
-echo "      selector:"
-echo "        nvidia.com/dynamo-component: Frontend"
-echo "        nvidia.com/dynamo-graph-deployment-name: <your-deployment-name>"
-echo "      ports:"
-echo "      - port: 8000"
-echo "        targetPort: 8000"
-echo "        nodePort: 30100"
-echo "        protocol: TCP"
-echo "    EOF"
+echo "  3. Or browse the README.md for detailed information"
 echo ""

@@ -260,7 +260,7 @@ data:
 EOF
 
 # Add dashboard JSON with proper indentation
-sed 's/^/    /' ~/dynamo-grove-brev/resources/dynamo-inference-dashboard.json >> /tmp/dynamo-inference-dashboard-configmap.yaml
+sed 's/^/    /' ~/dynamo-brev/resources/dynamo-inference-dashboard.json >> /tmp/dynamo-inference-dashboard-configmap.yaml
 
 # Apply ConfigMap
 kubectl apply -f /tmp/dynamo-inference-dashboard-configmap.yaml
@@ -433,7 +433,7 @@ rate(dynamo_frontend_output_sequence_tokens_sum[5m]) / rate(dynamo_frontend_outp
 
 ```
 # Test with low concurrency
-cd ~/dynamo-grove-brev/resources
+cd ~/dynamo-brev/resources
 ./run-benchmark.sh baseline
 
 # Check Grafana - note the TTFT values
