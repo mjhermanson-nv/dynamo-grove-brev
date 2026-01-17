@@ -405,23 +405,100 @@ We'll use a `DynamoGraphDeployment` resource that defines:
 - **VllmPrefillWorker**: 1 replica on GPU 0 for prompt processing
 - **VllmDecodeWorker**: 1 replica on GPU 1 for token generation
 
-### Step 1: Update the Deployment Configuration
+### Step 1: Create Deployment Manifest
 
-Before deploying, we need to update the YAML configuration with your specific values:
-
+We will create the `disagg_router.yaml` file dynamically with your specific configuration variables:
 
 ```bash
-# Update disagg_router.yaml with your configuration
+# Create the deployment YAML with environment variables
+cat <<EOF > disagg_router.yaml
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disagg-router
+spec:
+  services:
+    Frontend:
+      dynamoNamespace: vllm-disagg-router
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:$RELEASE_VERSION
+      envs:
+        - name: DYN_ROUTER_MODE
+          value: disaggregated
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      dynamoNamespace: vllm-disagg-router
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      envs:
+        - name: DYN_LOG
+          value: "info"
+      extraPodSpec:
+        volumes:
+        - name: local-model-cache
+          hostPath:
+            path: $CACHE_PATH
+            type: DirectoryOrCreate
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:$RELEASE_VERSION
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+          - name: local-model-cache
+            mountPath: /root/.cache
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type prefill
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      dynamoNamespace: vllm-disagg-router
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      envs:
+        - name: DYN_LOG
+          value: "info"
+      extraPodSpec:
+        volumes:
+        - name: local-model-cache
+          hostPath:
+            path: $CACHE_PATH
+            type: DirectoryOrCreate
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:$RELEASE_VERSION
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+          - name: local-model-cache
+            mountPath: /root/.cache
+          workingDir: /workspace/components/backends/vllm
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type decode
+EOF
 
-# Replace my-tag with actual version
-sed -i "s/my-tag/$RELEASE_VERSION/g" disagg_router.yaml
-
-# Replace cache path
-sed -i "s|/YOUR/LOCAL/CACHE/FOLDER|$CACHE_PATH|g" disagg_router.yaml
-
-echo "✓ Configuration updated in disagg_router.yaml"
+echo "✓ Deployment manifest created: disagg_router.yaml"
+echo "  Using Image Version: $RELEASE_VERSION"
+echo "  Using Cache Path:    $CACHE_PATH"
 echo ""
-echo "Verify image tags (should show version, not my-tag):"
+echo "Verify the configuration:"
 grep "image:" disagg_router.yaml
 ```
 
@@ -439,6 +516,40 @@ echo "✓ Deployment created. This will take 4-6 minutes for first run."
 echo "  - Pulling container images"
 echo "  - Downloading model from HuggingFace"
 echo "  - Loading model into GPU memory"
+```
+
+### Step 2b: Expose Frontend Service via NodePort
+
+**CRITICAL**: By default, the deployment is internal-only. We must expose it via a NodePort Service to access it on port `30100`.
+
+```bash
+NAMESPACE=${NAMESPACE:-dynamo}
+
+# Create NodePort service to expose the frontend
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-frontend-nodeport
+  namespace: $NAMESPACE
+spec:
+  type: NodePort
+  selector:
+    nvidia.com/dynamo-component: Frontend
+    nvidia.com/dynamo-graph-deployment-name: vllm-disagg-router
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30100
+    protocol: TCP
+    name: http
+EOF
+
+echo ""
+echo "✓ Service exposed on NodePort 30100"
+echo "  Access URL: http://$NODE_IP:30100"
+echo ""
+echo "Note: The service will be accessible once the frontend pod is running."
 ```
 
 ### Step 3: Monitor Deployment Progress
@@ -821,13 +932,16 @@ NAMESPACE=${NAMESPACE:-dynamo}
 # Delete the deployment
 kubectl delete dynamographdeployment vllm-disagg-router -n $NAMESPACE
 
+# Delete the NodePort service
+kubectl delete svc vllm-frontend-nodeport -n $NAMESPACE
+
 echo ""
-echo "✓ Deployment deleted"
+echo "✓ Deployment and service deleted"
 echo "Verifying pods are terminating:"
 kubectl get pods -n $NAMESPACE
 ```
 
-**Note:** Keep your namespace and platform for Lab 2! Only delete the deployment, not the namespace.
+**Note:** Keep your namespace and platform for Lab 2! Only delete the deployment and service, not the namespace.
 
 ## Troubleshooting
 
@@ -1013,7 +1127,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:${RELEASE_VERSION}
       envs:
         - name: DYN_ROUTER_MODE
           value: disaggregated
@@ -1032,10 +1146,10 @@ spec:
         volumes:
         - name: local-model-cache
           hostPath:
-            path: /data/huggingface-cache  # Update if instructor provides different path
+            path: ${CACHE_PATH}  # Defaults to /data/huggingface-cache
             type: DirectoryOrCreate
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:${RELEASE_VERSION}
           securityContext:
             capabilities:
               add:
@@ -1064,10 +1178,10 @@ spec:
         volumes:
         - name: local-model-cache
           hostPath:
-            path: /data/huggingface-cache  # Update if instructor provides different path
+            path: ${CACHE_PATH}  # Defaults to /data/huggingface-cache
             type: DirectoryOrCreate
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.5.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:${RELEASE_VERSION}
           securityContext:
             capabilities:
               add:
@@ -1178,6 +1292,9 @@ kubectl logs -l component=VllmDecodeWorker -n ${NAMESPACE} --tail=20
 ```bash
 # Delete the deployment
 kubectl delete dynamographdeployment vllm-disagg-router -n ${NAMESPACE}
+
+# Delete the NodePort service
+kubectl delete svc vllm-frontend-nodeport -n ${NAMESPACE}
 
 # Verify pods are terminating
 kubectl get pods -n ${NAMESPACE}
