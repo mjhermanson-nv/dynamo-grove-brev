@@ -7,25 +7,25 @@ Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo on Kubern
 ### 01 - Dynamo Deployment Guide
 **File**: `01-dynamo-deployment-guide.ipynb`
 
-Learn how to deploy and manage LLM inference workloads using Dynamo on Kubernetes:
-- Set up your Kubernetes environment
-- Configure NGC and HuggingFace credentials
-- Install Dynamo platform and CRDs
-- Deploy disaggregated serving architectures (separate prefill/decode workers)
-- Perform rolling updates and horizontal scaling
-- Run benchmarks with AI-Perf
+Deploy and manage LLM inference workloads using Dynamo on Kubernetes:
+- Set up NGC and HuggingFace credentials
+- Install Dynamo platform with cluster-wide operator
+- Deploy disaggregated serving architecture (separate prefill/decode workers)
+- Test deployment with OpenAI-compatible API
+- Benchmark performance with AI-Perf
 
 **Duration**: ~90 minutes
 
 ### 02 - Monitoring and Observability
 **File**: `02-monitoring-and-observability.ipynb`
 
-Set up monitoring and observability for your Dynamo deployments:
-- Access cluster-wide Grafana and Prometheus
-- Configure PodMonitors for metrics collection
-- Import and view Dynamo inference dashboards
-- Analyze key metrics (TTFT, inter-token latency, throughput)
+Monitor your Dynamo deployments with Prometheus and Grafana:
+- Verify cluster-wide Grafana and Prometheus installation
+- Configure PodMonitors for Dynamo metrics collection
+- Deploy and view Dynamo inference dashboard
+- Understand key metrics: TTFT, inter-token latency, throughput
 - Create custom Prometheus queries and alerts
+- Generate load and analyze performance
 
 **Duration**: ~20 minutes
 
@@ -33,11 +33,11 @@ Set up monitoring and observability for your Dynamo deployments:
 **File**: `03-grove-distributed-serving.ipynb`
 
 Learn distributed serving concepts with Grove:
-- Understand Grove architecture (NATS, etcd, NIXL)
-- Deploy distributed coordination infrastructure
-- Create Grove-enabled Dynamo deployments
+- Understand Grove architecture and multi-frontend load balancing
+- Deploy distributed coordination infrastructure (NATS, etcd)
+- Create Grove-enabled Dynamo deployments with NATS discovery
 - Monitor NATS and etcd with Grafana dashboards
-- Generate traffic and observe distributed metrics
+- Generate traffic and analyze distributed metrics
 - Understand single-node vs multi-node trade-offs
 - Learn when to use Grove in production
 
@@ -74,16 +74,18 @@ The bootstrap script installs:
 
 ### Option 2: Use an Existing Cluster
 
-If you already have a Kubernetes cluster with GPU support, you can jump straight into the workshops:
+If you already have a Kubernetes cluster with GPU support, you can jump straight into the guides:
 
 ```bash
-# Start with the first notebook
+# Clone and start with Guide 1
+git clone https://github.com/mjhermanson-nv/dynamo-grove-brev.git
+cd dynamo-grove-brev
 jupyter lab 01-dynamo-deployment-guide.ipynb
 ```
 
-## 📖 Workshop Structure
+## 📖 Guide Structure
 
-Each workshop is provided in two formats:
+Each guide is provided in two formats:
 - **`.md`** - Markdown source (authoritative, use for editing)
 - **`.ipynb`** - Jupyter notebook (generated from markdown)
 
@@ -100,7 +102,7 @@ cd resources
 dynamo-grove-brev/
 ├── 01-dynamo-deployment-guide.md/.ipynb      # Guide 1: Deployment
 ├── 02-monitoring-and-observability.md/.ipynb # Guide 2: Monitoring
-├── 03-grove-distributed-serving.md/.ipynb    # Guide 3: Grove (optional)
+├── 03-grove-distributed-serving.md/.ipynb    # Guide 3: Grove
 ├── oneshot.sh                                # Bootstrap script
 ├── resources/                                # Supporting files
 │   ├── run-benchmark.sh                      # AI-Perf benchmark wrapper
@@ -110,52 +112,57 @@ dynamo-grove-brev/
 │   ├── sync-notebooks.sh                     # Markdown to notebook sync
 │   ├── NOTEBOOK-WORKFLOW.md                  # Development workflow
 │   └── QUICK-REFERENCE.md                    # Quick command reference
-└── examples/                                 # Additional examples
+└── README.md                                 # This file
 ```
 
 ## 🎯 What You'll Learn
 
 ### Guide 1 Skills
 - Kubernetes fundamentals for ML workloads
-- Dynamo architecture and components
-- Disaggregated serving patterns
-- Deployment strategies (rolling updates, scaling)
+- NGC authentication and container image access
+- Dynamo platform installation and CRDs
+- Disaggregated serving architecture (prefill/decode separation)
+- OpenAI-compatible API testing
 - Performance benchmarking with AI-Perf
 
 ### Guide 2 Skills
-- Prometheus metrics collection and querying
-- Grafana dashboard creation and analysis
-- Key LLM inference metrics (TTFT, ITL, throughput)
-- Performance monitoring and alerting
-- Troubleshooting inference workloads
+- Prometheus metrics collection with PodMonitors
+- Grafana dashboard deployment and configuration
+- Key LLM inference metrics: TTFT, ITL, throughput
+- Performance monitoring and analysis
+- Prometheus alerting rules
+- Load testing and metric visualization
 
-### Guide 3 Skills (Optional)
-- Distributed systems architecture (NATS, etcd, message bus patterns)
-- NATS message bus and etcd coordination
+### Guide 3 Skills
+- Distributed systems architecture patterns
+- NATS message bus and pub/sub patterns
+- etcd coordination and service discovery
+- Multi-frontend load balancing strategies
 - NIXL distributed KV cache system
 - Grove-enabled deployment configuration
-- Real-time metrics analysis with Prometheus/Grafana
-- Multi-node serving strategies
-- Production scaling considerations
+- Real-time distributed metrics analysis
+- Multi-node serving strategies and trade-offs
 
 ## 🏗️ Architecture Patterns
 
-### Aggregated Serving
-- Single worker handles both prefill and decode
-- Simple setup, good for development
-- Lower resource requirements
-
-### Disaggregated Serving
+### Disaggregated Serving (Guide 1)
 - Separate prefill and decode workers
 - Maximum throughput and resource efficiency
 - Scales prefill and decode independently
-- Covered in Workshop 1
+- Deployed using DynamoGraphDeployment CRD
 
-### Monitoring Stack
+### Monitoring Stack (Guide 2)
 - Cluster-wide Prometheus for metrics collection
 - Grafana for visualization and dashboards
-- PodMonitors for automatic discovery
-- Covered in Workshop 2
+- PodMonitors for automatic service discovery
+- Pre-configured dashboards for Dynamo inference metrics
+
+### Distributed Serving (Guide 3)
+- NATS message bus for request routing and cache sharing
+- etcd for service discovery and coordination
+- Multi-frontend load balancing with Kubernetes Services
+- NIXL distributed KV cache across workers
+- Optimized for multi-node deployments
 
 ## 🔧 Troubleshooting
 
@@ -209,11 +216,12 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 
 ## 💡 Tips
 
-- **Start with Workshop 1**: It sets up the foundation for Workshop 2
-- **Run benchmarks in terminals**: Heavy workloads can crash notebook kernels
+- **Start with Guide 1**: Sets up the foundation for all subsequent guides
+- **Run benchmarks in terminals**: Use `resources/run-benchmark.sh` to avoid crashing notebook kernels
 - **Use markdown for editing**: Better version control and easier collaboration
-- **Keep notebooks clean**: Restart kernel and clear outputs before committing
-- **Check logs**: Use `kubectl logs` to troubleshoot deployment issues
+- **Reload notebooks after sync**: Ensure you're running the latest version
+- **Check logs with kubectl**: Essential for troubleshooting deployment issues
+- **Monitor resource usage**: Keep an eye on GPU memory and CPU utilization
 
 ## 🤝 Contributing
 
@@ -228,7 +236,7 @@ See `resources/NOTEBOOK-WORKFLOW.md` for development guidelines.
 
 ## 📄 License
 
-This workshop is provided as-is for learning and deploying Dynamo on Kubernetes.
+These guides are provided as-is for learning and deploying Dynamo on Kubernetes.
 
 ---
 
