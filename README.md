@@ -52,7 +52,7 @@ Learn distributed serving concepts with Grove:
 - Access to NVIDIA NGC (for Dynamo Helm charts and container images)
 - Access to HuggingFace (for model downloads)
 
-### Option 1: Bootstrap from Scratch
+### Bootstrap from Scratch
 
 Use the included bootstrap script to set up everything:
 
@@ -63,6 +63,9 @@ cd dynamo-grove-brev
 
 # Run the bootstrap (installs microk8s, kubectl, helm, k9s, GPU operator, storage, monitoring)
 sudo ./oneshot.sh
+
+# Start Jupyter Lab
+jupyter lab
 ```
 
 The bootstrap script installs:
@@ -72,16 +75,7 @@ The bootstrap script installs:
 - Storage provisioning (local-path)
 - Prometheus & Grafana (cluster-wide monitoring)
 
-### Option 2: Use an Existing Cluster
-
-If you already have a Kubernetes cluster with GPU support, you can jump straight into the guides:
-
-```bash
-# Clone and start with Guide 1
-git clone https://github.com/mjhermanson-nv/dynamo-grove-brev.git
-cd dynamo-grove-brev
-jupyter lab 01-dynamo-deployment-guide.ipynb
-```
+Once complete, open `01-dynamo-deployment-guide.ipynb` to begin.
 
 ## 📖 Guide Structure
 
