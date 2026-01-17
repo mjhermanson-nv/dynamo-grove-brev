@@ -90,6 +90,51 @@ Grove is Dynamo's distributed serving framework that enables:
 - Improves cache hit rates
 - Enables efficient multi-node scaling
 
+### How Multiple Frontends Work
+
+The architecture diagram shows 2 frontends, but **frontend replicas ≠ one per node**. Here's how it actually works in production:
+
+**Frontend Scaling Strategy**:
+```
+Small cluster (3 nodes):    2-3 frontend replicas
+Medium cluster (10 nodes):  3-5 frontend replicas
+Large cluster (50+ nodes):  5-10 frontend replicas
+```
+
+**Load Balancing via Kubernetes Service**:
+
+When you create a Service (NodePort or LoadBalancer), Kubernetes automatically load balances across all frontend pods:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  type: LoadBalancer  # or NodePort
+  selector:
+    component: frontend  # Selects ALL frontend pods
+  ports:
+  - port: 8000
+```
+
+**How Traffic Flows**:
+1. **External Load Balancer** (cloud provider or Ingress) receives request
+2. **Kubernetes Service** load balances to any frontend pod
+3. **Frontend** publishes inference request to NATS
+4. **NATS** routes to an available worker (on any node)
+5. **Worker** responds via NATS
+6. **Frontend** returns HTTP response
+
+**Key Benefits**:
+- ✅ **High Availability**: If one frontend crashes, others continue
+- ✅ **Load Distribution**: Spread HTTP connections across pods
+- ✅ **Dynamic Discovery**: NATS decouples frontends from workers
+- ✅ **Flexible Scaling**: Add/remove frontends independently
+
+**Single Node (This Lab)**:
+In your single-node setup, multiple frontends provide less benefit since there's no network distribution. But you can still see how NATS-based service discovery works!
+
 ### When to Use Grove
 
 | Scenario | Use Grove? | Why |
@@ -921,9 +966,11 @@ On a single node, all workers share memory naturally, so Grove adds overhead wit
 
 ## Additional Resources
 
-- **Grove Documentation**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove/
+- **Grove Deployment Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/grove.html
+- **Grove GitHub Repository**: https://github.com/NVIDIA/grove
 - **NATS Documentation**: https://docs.nats.io/
 - **etcd Documentation**: https://etcd.io/docs/
+- **NVIDIA Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
 - **Distributed Systems Patterns**: Understanding consensus and coordination
 - **Cache Sharing Strategies**: Martin Kleppmann's "Designing Data-Intensive Applications"
 
