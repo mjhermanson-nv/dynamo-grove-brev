@@ -621,41 +621,6 @@ echo ""
 echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/"
 ```
 
-### Step 5: Query NATS Metrics Directly
-
-The generic NATS dashboard may not work, but you can view NATS metrics directly in Grafana Explore:
-
-```bash
-cat <<'EOF'
-
-📊 To view NATS metrics in Grafana:
-
-1. Open Grafana: https://grafana0-$(hostname | sed 's/^brev-//')​.brevlab.com/
-2. Go to Explore (compass icon in left sidebar)
-3. Try these PromQL queries:
-
-**Dynamo's NATS Client Metrics:**
-- dynamo_component_nats_client_current_connections
-- rate(dynamo_component_nats_client_in_messages[1m])
-- rate(dynamo_component_nats_client_out_messages[1m])
-- rate(dynamo_component_nats_service_requests_total[1m])
-
-**NATS Server Metrics:**
-- nats_varz_connections{pod="nats-0"}
-- rate(nats_varz_in_msgs[1m])
-- rate(nats_varz_out_msgs[1m])
-- nats_varz_mem / (1024*1024)  # Memory in MB
-- nats_server_total_messages
-
-**etcd Health:**
-- etcd_server_has_leader
-- etcd_mvcc_db_total_size_in_bytes / (1024*1024)  # Size in MB
-
-These metrics show Grove's NATS usage and etcd coordination in real-time!
-
-EOF
-```
-
 ---
 
 ## Section 5: Understanding Grove Trade-offs
@@ -714,25 +679,38 @@ EOF
 
 ---
 
-## Section 6: Advanced Grove Features (Optional)
+## Section 6: Advanced Grove Features
 
 ### Cache Monitoring
 
-Check cache statistics from the workers:
+Check Grove coordination through worker logs:
 
 ```bash
-# Get cache stats from a worker pod
+# Get cache stats from worker logs
 NAMESPACE=${NAMESPACE:-dynamo}
 
 WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    echo "Checking cache stats from worker: $WORKER_POD"
-    kubectl exec -n $NAMESPACE $WORKER_POD -- curl -s localhost:8000/metrics 2>/dev/null | grep -E "(cache_hit|cache_miss)" || echo "Cache metrics not available yet"
+    echo "Checking NIXL/Grove activity in worker logs..."
+    echo ""
+    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl\|grove\|nats" | tail -10
+    
+    echo ""
+    echo "Worker pod: $WORKER_POD"
+    echo ""
+    echo "What to look for:"
+    echo "  - NIXL initialization messages"
+    echo "  - NATS connection status"
+    echo "  - KV cache registration"
+    echo "  - UCX backend messages (if using RDMA)"
 else
     echo "⚠️ No worker pods found"
+    echo "Make sure the vllm-grove-demo deployment is running"
 fi
 ```
+
+**Note**: Cache hit/miss metrics depend on workload patterns. In a single-node setup, local cache is more efficient than distributed cache, so you may not see significant Grove cache sharing activity.
 
 ### NATS Health Check
 
@@ -787,64 +765,52 @@ kubectl delete svc vllm-grove-demo-frontend-np -n $NAMESPACE
 echo "✓ Grove deployment removed"
 ```
 
-### Step 2: (Optional) Restore Lab 1 Deployment
+### Step 2: Verify Lab 1 Deployment is Still Running
 
-If you want to restore the original Lab 1 deployment:
+Your original Lab 1 deployment should still be running on port 30100:
 
 ```bash
-# Restore Lab 1 deployment from backup
+# Check Lab 1 deployment status
 NAMESPACE=${NAMESPACE:-dynamo}
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
-if [ -f /tmp/lab1-deployment-backup.yaml ]; then
-    echo "Restoring Lab 1 deployment..."
-    kubectl apply -f /tmp/lab1-deployment-backup.yaml
-    
-    echo "Waiting for Lab 1 deployment to be ready..."
-    sleep 10
-    kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-disagg-router
-    
-    echo ""
-    echo "✓ Lab 1 deployment restored"
-    echo "  Access at: http://$NODE_IP:30100"
-else
-    echo "No backup found at /tmp/lab1-deployment-backup.yaml"
-    echo "You can redeploy Lab 1 by running the cells in 01-dynamo-deployment-guide.ipynb"
-fi
+echo "Checking Lab 1 deployment..."
+kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE
+
+echo ""
+echo "Lab 1 pods:"
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-disagg-router
+
+echo ""
+echo "✓ Lab 1 deployment is available at: http://$NODE_IP:30100"
+echo ""
+echo "Test it:"
+echo "  curl http://$NODE_IP:30100/v1/models"
 ```
 
-### Step 3: (Optional) Remove Grove Infrastructure
+### Step 3: Remove Grove Infrastructure (Optional)
 
-If you want to remove NATS and etcd after learning:
+Only remove NATS and etcd if you're done experimenting with Grove:
 
 ```bash
-# This is optional - only do if you're done with Grove learning
+# Remove NATS
+echo "Removing NATS..."
+helm uninstall nats -n nats-system
+kubectl delete namespace nats-system
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🧹 Grove Infrastructure Cleanup (Optional)"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "This will remove NATS and etcd from your cluster."
-echo ""
-read -p "Continue? (y/N) " -n 1 -r
-echo ""
+# Remove etcd  
+echo "Removing etcd..."
+helm uninstall etcd -n etcd-system
+kubectl delete namespace etcd-system
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Uninstall NATS
-    echo "Removing NATS..."
-    helm uninstall nats -n nats-system 2>/dev/null || echo "  NATS not found"
-    kubectl delete namespace nats-system 2>/dev/null || echo "  Namespace not found"
-    
-    # Uninstall etcd
-    echo "Removing etcd..."
-    helm uninstall etcd -n etcd-system 2>/dev/null || echo "  etcd not found"
-    kubectl delete namespace etcd-system 2>/dev/null || echo "  Namespace not found"
-    
-    echo ""
-    echo "✓ Grove infrastructure removed"
-else
-    echo "Cleanup cancelled - Grove infrastructure kept for future experiments"
-fi
+# Remove PodMonitors
+kubectl delete podmonitor nats -n nats-system 2>/dev/null || true
+kubectl delete podmonitor etcd -n etcd-system 2>/dev/null || true
+
+echo ""
+echo "✓ Grove infrastructure removed"
+echo ""
+echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this lab"
 ```
 
 ---

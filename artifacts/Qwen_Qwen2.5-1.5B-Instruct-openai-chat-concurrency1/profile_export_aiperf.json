@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "aiperf_version": "0.4.0",
+  "benchmark_id": "a19c222a-24fd-4485-9af7-5bb805c994ac",
+  "error_request_count": {
+    "unit": "requests",
+    "avg": 100.0
+  },
+  "error_isl": {
+    "unit": "tokens",
+    "avg": 550.0,
+    "p1": 550.0,
+    "p5": 550.0,
+    "p10": 550.0,
+    "p25": 550.0,
+    "p50": 550.0,
+    "p75": 550.0,
+    "p90": 550.0,
+    "p95": 550.0,
+    "p99": 550.0,
+    "min": 550.0,
+    "max": 550.0,
+    "std": 0.0
+  },
+  "total_error_isl": {
+    "unit": "tokens",
+    "avg": 55000.0
+  },
+  "telemetry_data": {
+    "summary": {
+      "endpoints_configured": [],
+      "endpoints_successful": [],
+      "start_time": "2026-01-16T23:44:06.099877",
+      "end_time": "2026-01-16T23:44:06.253073"
+    },
+    "endpoints": {},
+    "error_summary": []
+  },
+  "input_config": {
+    "endpoint": {
+      "model_names": [
+        "Qwen/Qwen2.5-1.5B-Instruct"
+      ],
+      "type": "chat",
+      "streaming": true,
+      "url": "http://172.27.30.77:30100"
+    },
+    "loadgen": {
+      "concurrency": 1,
+      "request_rate_mode": "concurrency_burst",
+      "request_count": 100
+    },
+    "cli_command": "aiperf profile --log-level 'warning' --model 'Qwen/Qwen2.5-1.5B-Instruct' --url 'http://172.27.30.77:30100' --endpoint-type 'chat' --streaming --concurrency 1 --request-count 100",
+    "benchmark_id": "a19c222a-24fd-4485-9af7-5bb805c994ac"
+  },
+  "was_cancelled": false,
+  "error_summary": [
+    {
+      "error_details": {
+        "type": "ClientConnectorError",
+        "message": "ClientConnectorError(ConnectionKey(host='172.27.30.77', port=30100, is_ssl=False, ssl=True, proxy=None, proxy_auth=None, proxy_headers_hash=None), ConnectionRefusedError(111, \"Connect call failed ('172.27.30.77', 30100)\"))",
+        "cause": "ConnectionRefusedError(111, \"Connect call failed ('172.27.30.77', 30100)\")",
+        "details": [
+          "ConnectionKey(host='172.27.30.77', port=30100, is_ssl=False, ssl=True, proxy=None, proxy_auth=None, proxy_headers_hash=None)",
+          "ConnectionRefusedError(111, \"Connect call failed ('172.27.30.77', 30100)\")"
+        ]
+      },
+      "count": 100
+    }
+  ],
+  "start_time": "2026-01-16T23:44:06.099877",
+  "end_time": "2026-01-16T23:44:06.253073"
+}
