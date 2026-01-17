@@ -73,10 +73,15 @@ Grove is Dynamo's distributed serving framework that enables:
          │                │                │
     ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
     │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
-    │(Node 1/4)│    │(Node 2/5)│    │(Node 3/6)│
+    │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
+    │  +GPU    │    │  +GPU    │    │  +GPU    │
     └──────────┘    └──────────┘    └──────────┘
     
     Shared KV Cache across workers via NATS
+
+Note: Workers typically run on GPU nodes (4-6), separate from
+      CPU-only frontend nodes (1-3). In smaller clusters, they
+      may share nodes with frontends.
 ```
 
 ### Key Concepts
