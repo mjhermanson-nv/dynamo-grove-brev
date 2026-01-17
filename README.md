@@ -23,9 +23,9 @@ Monitor your Dynamo deployments with Prometheus and Grafana:
 - Verify cluster-wide Grafana and Prometheus installation
 - Configure PodMonitors for Dynamo metrics collection
 - Deploy and view Dynamo inference dashboard
+- Generate load and analyze performance metrics
 - Understand key metrics: TTFT, inter-token latency, throughput
-- Create custom Prometheus queries and alerts
-- Generate load and analyze performance
+- Create custom Prometheus alerts
 
 **Duration**: ~20 minutes
 
@@ -131,7 +131,7 @@ dynamo-grove-brev/
 - Key LLM inference metrics: TTFT, ITL, throughput
 - Performance monitoring and analysis
 - Prometheus alerting rules
-- Load testing and metric visualization
+- Load generation and metric visualization
 
 ### Guide 3 Skills
 - Distributed systems architecture patterns

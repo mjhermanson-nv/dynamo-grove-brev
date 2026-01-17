@@ -299,33 +299,7 @@ The dashboard displays:
 
 **Note**: The Grafana also has a "Dynamo Operator" dashboard showing operator metrics (reconciliation loops, workqueues), but the inference dashboard shows model serving metrics.
 
-### Step 2: Explore Prometheus Queries
-
-You can also access Prometheus directly to query metrics. Click on "Explore" in Grafana's left sidebar, then try these queries:
-
-**Example Prometheus Queries:**
-
-1. **Total requests to frontend:**
-   ```
-   dynamo_frontend_requests_total
-   ```
-
-2. **Time to first token (95th percentile):**
-   ```
-   histogram_quantile(0.95, dynamo_frontend_time_to_first_token_seconds_bucket)
-   ```
-
-3. **Request rate (per second):**
-   ```
-   rate(dynamo_frontend_requests_total[1m])
-   ```
-
-4. **Inter-token latency:**
-   ```
-   dynamo_frontend_inter_token_latency_seconds
-   ```
-
-### Step 3: Generate Load to See Metrics
+### Step 2: Generate Load to See Metrics
 
 To see interesting metrics in the dashboard, generate some load using the benchmark script from Lab 1.
 
