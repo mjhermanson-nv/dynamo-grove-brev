@@ -12,33 +12,38 @@ jupyter:
       jupytext_version: 1.18.1
 ---
 
-# Lab 3: Distributed Serving with Grove
+# Lab 3: Distributed Dynamo with Grove Orchestration
 
 ## Overview
 
 In this lab, you will:
-- Understand Grove's distributed serving architecture
-- Deploy NATS and etcd for distributed coordination
-- Enable distributed KV cache sharing across workers
+- Understand Dynamo's distributed serving architecture with Grove orchestration
+- Deploy NATS and etcd for distributed coordination and KV-aware routing
+- Enable distributed KV cache awareness and transfer via NIXL
 - Monitor distributed components with Grafana
-- Understand when and why to use Grove in production
+- Understand when and why to use distributed Dynamo in production
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
-**Note**: Grove is designed for multi-node Kubernetes clusters. While we'll deploy it on a single node for learning purposes, its benefits are realized when scaling across multiple nodes.
+**Note**: Distributed Dynamo is designed for multi-node Kubernetes clusters or single nodes with multiple GPUs. While we'll deploy it on a single node for learning purposes, maximum benefits are realized when scaling across multiple nodes with high cache hit workloads.
 
 ## Duration: ~45 minutes
 
 ---
 
-## Section 1: Understanding Grove Architecture
+## Section 1: Understanding Distributed Dynamo Architecture
 
-### What is Grove?
+### What is Grove vs Dynamo?
 
-Grove is Dynamo's distributed serving framework that enables:
-- **Multi-node deployments** across Kubernetes clusters
-- **Distributed KV cache sharing** between worker nodes via NATS
-- **Coordination and discovery** using etcd
+**Dynamo** is NVIDIA's inference serving framework (the Python code, Router, Frontend, Workers).
+
+**Grove** is the Kubernetes Operator that orchestrates Dynamo deployments (handling CRDs like `DynamoGraphDeployment`, pod gangs, startup order).
+
+**Distributed Dynamo** (orchestrated by Grove) enables:
+- **Multi-node deployments** across Kubernetes clusters or multi-GPU single nodes
+- **KV-aware routing** where the Router knows which worker has which cache blocks
+- **Distributed KV cache transfer** between workers via NIXL (NVIDIA Inference Transfer Library)
+- **Coordination and discovery** using NATS for metadata and etcd for service registration
 - **Advanced features** like cache migration and load balancing
 
 ### Architecture Components
@@ -60,8 +65,8 @@ Grove is Dynamo's distributed serving framework that enables:
                           │
               ┌───────────▼───────────┐
               │  NATS Message Bus     │
-              │  (Request Routing &   │
-              │   Cache Sharing)      │
+              │  (Metadata, Routing,  │
+              │   Cache Awareness)    │
               └───────────┬───────────┘
                           │
               ┌───────────▼───────────┐
@@ -75,9 +80,15 @@ Grove is Dynamo's distributed serving framework that enables:
     │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
     │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
     │  +GPU    │    │  +GPU    │    │  +GPU    │
-    └──────────┘    └──────────┘    └──────────┘
-    
-    Shared KV Cache across workers via NATS
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         │                │                │
+         └────────────────┼────────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  NIXL (KV Cache       │
+              │   Data Transfer)      │
+              │  RDMA/TCP/SSD         │
+              └───────────────────────┘
 
 Note: Workers typically run on GPU nodes (4-6), separate from
       CPU-only frontend nodes (1-3). In smaller clusters, they
@@ -87,19 +98,26 @@ Note: Workers typically run on GPU nodes (4-6), separate from
 ### Key Concepts
 
 **NATS**: A high-performance message bus that enables:
-- Real-time cache synchronization
-- Low-latency pub/sub messaging
+- Metadata sharing (cache events, routing tables)
+- Low-latency pub/sub messaging for coordination
 - Resilient delivery guarantees
+- **Note**: NATS does NOT transfer the actual KV cache data (which is gigabytes of tensors)
 
 **etcd**: A distributed key-value store that provides:
 - Service discovery and registration
 - Configuration management
 - Leader election and coordination
 
-**Distributed KV Cache**: Allows workers to share key-value cache entries:
-- Reduces redundant computation
-- Improves cache hit rates
-- Enables efficient multi-node scaling
+**NIXL (NVIDIA Inference Transfer Library)**: Handles actual KV cache data transfer:
+- Uses high-speed transports (RDMA, TCP, or CPU/SSD offload)
+- Transfers gigabytes of tensor data between workers
+- Direct worker-to-worker communication (not through NATS)
+
+**KV-Aware Routing**: The Router knows which worker has which cache blocks:
+- NATS shares metadata about cache state
+- Router directs requests to workers with relevant cached prefixes
+- Improves cache hit rates even on single node with multiple GPUs
+- Workers transfer actual cache data via NIXL when needed
 
 ### How Multiple Frontends Work
 
@@ -132,33 +150,37 @@ spec:
 **How Traffic Flows**:
 1. **External Load Balancer** (cloud provider or Ingress) receives request
 2. **Kubernetes Service** load balances to any frontend pod
-3. **Frontend** publishes inference request to NATS
-4. **NATS** routes to an available worker (on any node)
-5. **Worker** responds via NATS
-6. **Frontend** returns HTTP response
+3. **Frontend** sends inference request via NATS
+4. **NATS** routes to an available worker (KV-aware routing if enabled)
+5. **Worker** may receive KV cache data from another worker via NIXL
+6. **Worker** responds via NATS
+7. **Frontend** returns HTTP response
 
 **Key Benefits**:
 - ✅ **High Availability**: If one frontend crashes, others continue
 - ✅ **Load Distribution**: Spread HTTP connections across pods
-- ✅ **Dynamic Discovery**: NATS decouples frontends from workers
+- ✅ **Dynamic Discovery**: NATS decouples frontends from workers (Dynamo 0.7.x requires NATS/etcd; 0.8+ supports K8s-native discovery)
 - ✅ **Flexible Scaling**: Add/remove frontends independently
+- ✅ **KV-Aware Routing**: Route requests to workers with relevant cached data
 
 **Single Node (This Lab)**:
-In your single-node setup, multiple frontends provide less benefit since there's no network distribution. But you can still see how NATS-based service discovery works!
+Even in a single-node setup with multiple GPUs/workers, KV-aware routing provides benefits! The Router uses NATS to track which worker has which cached prefixes, directing requests to the worker with the best cache hit potential.
 
-### When to Use Grove
+### When to Use Distributed Dynamo
 
-| Scenario | Use Grove? | Why |
+| Scenario | Use Distributed Dynamo? | Why |
 |----------|-----------|-----|
-| Single node deployment | ❌ No | Adds overhead without benefit |
-| 2-3 nodes | ⚠️ Maybe | Benefit depends on cache hit patterns |
-| 4+ nodes | ✅ Yes | Significant performance improvements |
-| High traffic, repeated queries | ✅ Yes | Cache sharing reduces latency |
-| Low traffic, unique queries | ❌ No | Cache misses negate benefits |
+| Single GPU | ❌ No | Adds overhead without benefit |
+| Multiple GPUs, single node | ✅ Yes | KV-aware routing improves cache hits between GPU workers |
+| 2-3 nodes | ✅ Yes | Cache awareness and coordination provide benefits |
+| 4+ nodes | ✅ Strongly Yes | Significant performance improvements from distributed cache awareness |
+| High traffic, repeated queries | ✅ Yes | Cache-aware routing reduces latency |
+| Low traffic, unique queries | ⚠️ Maybe | Lower cache hit rates, but coordination still useful |
+| Dynamo 0.8+ | ℹ️ Info | Can use K8s-native discovery (no NATS/etcd required) for simple deployments |
 
 ---
 
-## Section 2: Deploy Grove Infrastructure
+## Section 2: Deploy Distributed Infrastructure
 
 ### Step 1: Set Environment Variables
 
@@ -172,19 +194,19 @@ export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🌲 Lab 3: Grove Distributed Serving Configuration"
+echo "🌲 Lab 3: Distributed Dynamo Configuration"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Release Version:  $RELEASE_VERSION"
 echo "  Namespace:        $NAMESPACE"
 echo "  Node IP:          $NODE_IP"
 echo ""
-echo "✓ Environment configured for Grove setup"
+echo "✓ Environment configured for distributed Dynamo setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ```
 
 ### Step 2: Install NATS Message Bus
 
-NATS will handle distributed cache communication between workers:
+NATS handles distributed coordination metadata between Dynamo components:
 
 ```bash
 # Create namespace for NATS
@@ -210,6 +232,9 @@ echo ""
 echo "✓ NATS installed successfully"
 echo "  Connection: nats://nats.nats-system:4222"
 echo "  Metrics: Port 7777"
+echo ""
+echo "Note: NATS handles metadata (cache events, routing tables)."
+echo "      Actual KV cache data transfers via NIXL (RDMA/TCP)."
 ```
 
 ### Step 3: Install etcd Coordination Layer
@@ -268,8 +293,9 @@ kubectl get svc -n etcd-system
 
 echo ""
 echo "✓ Grove infrastructure verified"
-echo "  NATS:  nats://nats.nats-system:4222"
-echo "  etcd:  http://etcd.etcd-system:2379"
+echo "  NATS:  nats://nats.nats-system:4222 (metadata/coordination)"
+echo "  etcd:  http://etcd.etcd-system:2379 (service discovery)"
+echo "  NIXL will handle KV cache data transfer between workers"
 ```
 
 ### Step 4: Enable Prometheus Monitoring
@@ -316,45 +342,49 @@ spec:
 EOF
 
 echo ""
-echo "✓ Prometheus monitoring enabled for Grove infrastructure"
+echo "✓ Prometheus monitoring enabled for distributed infrastructure"
 echo "  Metrics will be available in Grafana within 2-3 minutes"
 echo ""
 echo "  NATS metrics: Scraped from prometheus-nats-exporter (port: prom-metrics)"
 echo "  etcd metrics: Scraped directly from etcd's /metrics endpoint (port: client)"
 echo ""
 echo "Note: etcd metrics typically appear faster than NATS metrics"
+echo "      NATS metrics show coordination traffic, not KV cache data volume"
 ```
 
 ---
 
-## Section 3: Deploy Grove-Enabled Model
+## Section 3: Deploy Distributed Dynamo Model
 
-### Understanding Dynamo's NATS Integration
+### Understanding Dynamo's Distributed Architecture
 
-Dynamo automatically uses NATS for distributed communication when NATS and etcd are available in the cluster. The deployment will:
+Dynamo (orchestrated by Grove) automatically uses NATS and etcd for distributed coordination when they are available in the cluster. The deployment will:
 
-**1. Workers register via NATS**: Each worker announces itself to the message bus
+**1. Workers register via NATS**: Each worker announces itself and its cache state
 **2. Frontend discovers workers**: The frontend finds workers through NATS service discovery
-**3. NIXL handles KV cache**: NVIDIA's distributed KV cache system coordinates cache sharing
+**3. KV-aware Router**: Routes requests to workers with relevant cached data
+**4. NIXL handles KV cache data**: Workers transfer actual KV cache tensors via NIXL (RDMA/TCP), not through NATS
 
-### Step 1: Create Grove-Enabled Deployment
+**Note**: In Dynamo 0.8+, Kubernetes-native discovery (EndpointSlices) is available as an alternative to NATS/etcd for simpler deployments without KV-aware routing.
 
-We'll create a deployment with 2 workers to demonstrate Grove's distributed architecture:
+### Step 1: Create Distributed Dynamo Deployment
+
+We'll create a deployment with 2 workers to demonstrate distributed architecture and KV-aware routing:
 
 ```bash
-# Create Grove-enabled deployment
-echo "Creating Grove-enabled deployment with 2 workers..."
+# Create distributed Dynamo deployment
+echo "Creating distributed Dynamo deployment with 2 workers..."
 
 cat <<'EOF' | kubectl apply -f -
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-grove-demo
+  name: vllm-distributed-demo
   namespace: dynamo
 spec:
   services:
     Frontend:
-      dynamoNamespace: vllm-grove-demo
+      dynamoNamespace: vllm-distributed-demo
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -362,7 +392,7 @@ spec:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-grove-demo
+      dynamoNamespace: vllm-distributed-demo
       componentType: worker
       replicas: 2
       resources:
@@ -395,9 +425,9 @@ spec:
 EOF
 
 echo ""
-echo "✓ Grove-enabled deployment created"
-echo "  Deployment: vllm-grove-demo"
-echo "  Workers: 2 (will use NATS for discovery)"
+echo "✓ Distributed Dynamo deployment created"
+echo "  Deployment: vllm-distributed-demo"
+echo "  Workers: 2 (will use NATS for coordination and NIXL for cache transfer)"
 ```
 
 ### Step 2: Create NodePort Service
@@ -410,13 +440,13 @@ cat <<'EOF' | kubectl apply -f -
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm-grove-demo-frontend-np
+  name: vllm-distributed-demo-frontend-np
   namespace: dynamo
 spec:
   type: NodePort
   selector:
     nvidia.com/dynamo-component: Frontend
-    nvidia.com/dynamo-graph-deployment-name: vllm-grove-demo
+    nvidia.com/dynamo-graph-deployment-name: vllm-distributed-demo
   ports:
   - port: 8000
     targetPort: 8000
@@ -434,7 +464,7 @@ echo "  Access at: http://$NODE_IP:30200"
 
 ```bash
 # Wait for pods to be ready
-echo "Waiting for Grove-enabled deployment..."
+echo "Waiting for distributed Dynamo deployment..."
 echo "This may take 2-3 minutes for model download and initialization..."
 echo ""
 
@@ -442,15 +472,15 @@ NAMESPACE=${NAMESPACE:-dynamo}
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready --timeout=300s \
-  pods -l nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo \
+  pods -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo \
   -n $NAMESPACE 2>/dev/null || echo "Pods are initializing..."
 
 echo ""
 echo "Deployment status:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
 
 echo ""
-echo "✓ Grove-enabled deployment ready"
+echo "✓ Distributed Dynamo deployment ready"
 ```
 
 ### Step 4: Test Inference
@@ -464,43 +494,49 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Explain Grove in one sentence"}],
+    "messages": [{"role": "user", "content": "Explain distributed inference in one sentence"}],
     "max_tokens": 50
   }' | python3 -m json.tool
 
 echo ""
-echo "✓ Grove deployment is serving requests via NATS"
+echo "✓ Distributed Dynamo deployment is serving requests"
+echo "  Router uses NATS for worker coordination"
+echo "  NIXL handles KV cache data transfer between workers"
 ```
 
-### Step 5: Verify NATS Communication
+### Step 5: Verify NATS and NIXL Integration
 
 ```bash
-# Check worker logs for NATS connectivity
-echo "Verifying NATS integration..."
+# Check worker logs for NATS connectivity and NIXL initialization
+echo "Verifying NATS and NIXL integration..."
 NAMESPACE=${NAMESPACE:-dynamo}
 
-WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
     echo "Checking worker: $WORKER_POD"
     kubectl logs -n $NAMESPACE $WORKER_POD 2>&1 | grep -i "nats\|nixl" | head -5
     
     echo ""
-    echo "✓ Workers are using NATS for distributed coordination"
-    echo "  NIXL (NVIDIA's distributed KV cache system) is active"
+    echo "✓ Workers are using:"
+    echo "  • NATS for coordination and cache awareness"
+    echo "  • NIXL for KV cache data transfer (RDMA/TCP/SSD)"
+    echo ""
+    echo "Note: NATS carries metadata (cache events, routing tables)."
+    echo "      NIXL transfers the actual tensor data between workers."
 else
     echo "⚠️ No worker pods found. Make sure the deployment is running:"
-    kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo
+    kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
 fi
 ```
 
 ---
 
-## Section 4: Monitoring Grove Components
+## Section 4: Monitoring Distributed Components
 
 ### Step 1: Access Grafana Dashboards
 
-The Grove infrastructure dashboards were created during the oneshot.sh bootstrap:
+The distributed infrastructure dashboards were created during the oneshot.sh bootstrap:
 
 ```bash
 # Get Grafana URL
@@ -508,13 +544,13 @@ BREV_ID=$(hostname | cut -d'-' -f2)
 GRAFANA_URL="https://grafana0-${BREV_ID}.brevlab.com/"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📊 Grove Monitoring Dashboards"
+echo "📊 Distributed Dynamo Monitoring Dashboards"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Grafana URL: $GRAFANA_URL"
 echo ""
 echo "  Available Dashboards:"
-echo "    • NATS Overview - Message bus metrics"
-echo "    • etcd Overview - Coordination layer metrics"
+echo "    • NATS Overview - Message bus metrics (metadata/coordination)"
+echo "    • etcd Overview - Service discovery metrics"
 echo "    • Dynamo Inference Metrics - Model serving metrics"
 echo ""
 echo "🔗 Open Grafana and search for these dashboards"
@@ -523,28 +559,29 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 ### Step 2: Understanding NATS Metrics
 
-The NATS Overview dashboard shows real-time metrics about the message bus that Grove uses for distributed coordination.
+The NATS Overview dashboard shows real-time metrics about the message bus that Dynamo uses for distributed coordination metadata (not KV cache data).
 
 #### Connection Metrics (Top Left Panel)
 
 **`nats_varz_connections`** - Current active connections to NATS
-- **What it shows**: Number of clients currently connected to the NATS server
+- **What it shows**: Number of Dynamo components connected to NATS
 - **Expected value**: 
-  - With Grove deployment running: 2-4 connections (workers + frontend)
+  - With distributed deployment running: 2-4 connections (workers + frontend)
   - Without active deployment: 0
-- **Why it matters**: Each Dynamo component (frontend, workers) maintains a connection to NATS for request routing
+- **Why it matters**: Each Dynamo component (frontend, workers) maintains a connection to NATS for coordination
 
 #### Message Rate Metrics (Top Center Panels)
 
 **`rate(nats_varz_in_msgs[1m])`** - Incoming messages per second
-- **What it shows**: How many messages NATS is receiving per second
+- **What it shows**: Coordination messages NATS is receiving (cache events, routing metadata)
 - **Expected value**: 
-  - Idle: 0 msg/s
+  - Idle: Low (< 1 msg/s for heartbeats)
   - During load: 10-100+ msg/s depending on request rate
-- **Why it matters**: Shows the message throughput into NATS from Dynamo components
+- **Why it matters**: Shows the coordination throughput (NOT KV cache data volume)
+- **Important**: NATS messages are small metadata packets, not gigabytes of tensor data
 
 **`rate(nats_varz_out_msgs[1m])`** - Outgoing messages per second
-- **What it shows**: How many messages NATS is sending per second
+- **What it shows**: How many coordination messages NATS is distributing
 - **Expected value**: Similar to or slightly higher than incoming rate
 - **Why it matters**: NATS may send multiple copies of messages to subscribers (pub/sub pattern)
 
@@ -600,7 +637,7 @@ The NATS Overview dashboard shows real-time metrics about the message bus that G
 
 **Healthy State**:
 - ✅ Connections: 2-4 (workers + frontend connected)
-- ✅ Message rates: Correlated with request traffic
+- ✅ Message rates: Correlated with request traffic (metadata only)
 - ✅ CPU: < 20%
 - ✅ Memory: Stable, not growing continuously
 - ✅ Subscriptions: Non-zero (services registered)
@@ -611,6 +648,8 @@ The NATS Overview dashboard shows real-time metrics about the message bus that G
 - ⚠️ CPU: Sustained > 80% → NATS bottleneck
 - ⚠️ Memory: Continuously growing → memory leak or message backlog
 - ⚠️ Subscriptions: 0 → services not registering with NATS
+
+**Important Note**: NATS message volume does NOT reflect KV cache data transfer volume. NIXL handles the heavy tensor data transfer (gigabytes) separately via RDMA/TCP.
 
 ### Step 3: Understanding etcd Metrics
 
@@ -628,13 +667,13 @@ Key etcd metrics to monitor:
 - `etcd_debugging_mvcc_put_total` - Total PUT operations
 - `etcd_debugging_mvcc_range_total` - Total GET operations
 
-### Step 4: Test Grove with Traffic
+### Step 4: Test Distributed Dynamo with Traffic
 
-Generate meaningful traffic to see Grove in action:
+Generate meaningful traffic to see distributed coordination in action:
 
 ```bash
 # Generate test traffic with concurrent requests
-echo "Generating traffic to Grove-enabled deployment..."
+echo "Generating traffic to distributed Dynamo deployment..."
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 # Function to send a request
@@ -653,9 +692,9 @@ send_request() {
 # Send 30 requests with 3 concurrent workers
 echo "Sending 30 requests with 3 concurrent connections..."
 echo "This will generate metrics for:"
-echo "  - NATS message throughput"
+echo "  - NATS coordination message throughput"
 echo "  - Worker utilization across 2 workers"
-echo "  - Request distribution via NATS"
+echo "  - KV-aware request routing"
 echo ""
 
 for i in {1..10}; do
@@ -672,28 +711,31 @@ echo "✓ Sent 30 requests with concurrent load"
 echo ""
 echo "Check metrics in Grafana:"
 echo "  - Dynamo Inference: Request throughput, TTFT, ITL across workers"
-echo "  - etcd Overview: Key operations (if Grove uses etcd for coordination)"
+echo "  - NATS Overview: Coordination message rates (metadata only)"
+echo "  - etcd Overview: Service discovery operations"
 echo ""
 echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/"
 ```
 
 ---
 
-## Section 5: Understanding Grove Trade-offs
+## Section 5: Understanding Distributed Dynamo Trade-offs
 
 ### Single-Node vs Multi-Node
 
-**Single Node (Current Setup)**:
+**Single Node with Multiple GPUs (Typical Dev Setup)**:
 ```
-✗ No benefit from cache sharing (all workers on same node)
-✗ Added latency from NATS message passing
-✗ Additional resource overhead (NATS + etcd)
+✓ KV-aware routing still beneficial (routes to worker with cached data)
 ✓ Learning opportunity to understand architecture
+✓ Workers can share cache blocks via NIXL locally
+✗ Less dramatic network benefits (same machine)
+✗ Additional resource overhead (NATS + etcd)
 ```
 
 **Multi-Node (Production)**:
 ```
-✓ Workers share cache across nodes
+✓ KV-aware Router directs requests to nodes with relevant cache
+✓ NIXL transfers cache data efficiently (RDMA/TCP between nodes)
 ✓ Improved cache hit rates = lower latency
 ✓ Better resource utilization across cluster
 ✓ Enables advanced features (cache migration, load balancing)
@@ -707,66 +749,73 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 # Display performance comparison
 cat <<'EOF'
 
-Performance Impact of Grove:
+Performance Impact of Distributed Dynamo:
 
-┌─────────────────────┬──────────────┬──────────────┐
-│ Metric              │ Single Node  │ Multi-Node   │
-├─────────────────────┼──────────────┼──────────────┤
-│ Cache Hit Rate      │ Same         │ +20-40%      │
-│ Latency (P50)       │ +5-10ms      │ +2-5ms       │
-│ Latency (P99)       │ +10-20ms     │ +5-10ms      │
-│ Throughput          │ -5-10%       │ +30-60%      │
-│ Memory Overhead     │ +100-200MB   │ +100-200MB   │
-└─────────────────────┴──────────────┴──────────────┘
+┌─────────────────────┬──────────────────┬──────────────┐
+│ Metric              │ Single Node      │ Multi-Node   │
+│                     │ (Multi-GPU)      │              │
+├─────────────────────┼──────────────────┼──────────────┤
+│ Cache Hit Rate      │ +10-20%          │ +20-40%      │
+│ Latency (P50)       │ +2-5ms           │ +2-5ms       │
+│ Latency (P99)       │ +5-10ms          │ +5-10ms      │
+│ Throughput          │ Same to +10%     │ +30-60%      │
+│ Memory Overhead     │ +100-200MB       │ +100-200MB   │
+└─────────────────────┴──────────────────┴──────────────┘
 
-When Grove Helps Most:
-  • Multiple nodes with high traffic
+When Distributed Dynamo Helps Most:
+  • Multiple GPUs or nodes with high traffic
   • Repeated queries (high cache hit potential)
   • Long context lengths (expensive to recompute)
   • Batch processing workloads
 
-When Grove May Not Help:
-  • Single node deployments
-  • Unique queries (low cache hit rate)
-  • Short context lengths
-  • Real-time streaming with varying prompts
+When It May Not Help:
+  • Single GPU deployments
+  • Unique queries every time (low cache hit rate)
+  • Very short context lengths
+  • Real-time streaming with completely unique prompts
+
+Architecture Notes:
+  • Grove = Kubernetes Operator (orchestration)
+  • Dynamo = Serving Framework (actual inference)
+  • NATS = Metadata/coordination (small messages)
+  • NIXL = KV cache data transfer (large tensors via RDMA/TCP)
 EOF
 ```
 
 ---
 
-## Section 6: Advanced Grove Features
+## Section 6: Advanced Distributed Features
 
 ### Cache Monitoring
 
-Check Grove coordination through worker logs:
+Check distributed coordination through worker logs:
 
 ```bash
 # Get cache stats from worker logs
 NAMESPACE=${NAMESPACE:-dynamo}
 
-WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-grove-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    echo "Checking NIXL/Grove activity in worker logs..."
+    echo "Checking NIXL/NATS activity in worker logs..."
     echo ""
-    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl\|grove\|nats" | tail -10
+    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl\|nats" | tail -10
     
     echo ""
     echo "Worker pod: $WORKER_POD"
     echo ""
     echo "What to look for:"
-    echo "  - NIXL initialization messages"
-    echo "  - NATS connection status"
-    echo "  - KV cache registration"
-    echo "  - UCX backend messages (if using RDMA)"
+    echo "  - NIXL initialization messages (KV cache transfer setup)"
+    echo "  - NATS connection status (coordination layer)"
+    echo "  - KV cache registration events"
+    echo "  - UCX backend messages (if using RDMA for cache transfer)"
 else
     echo "⚠️ No worker pods found"
-    echo "Make sure the vllm-grove-demo deployment is running"
+    echo "Make sure the vllm-distributed-demo deployment is running"
 fi
 ```
 
-**Note**: Cache hit/miss metrics depend on workload patterns. In a single-node setup, local cache is more efficient than distributed cache, so you may not see significant Grove cache sharing activity.
+**Note**: Cache hit/miss metrics depend on workload patterns. Even on a single node with multiple GPUs, KV-aware routing can improve cache hits by directing requests to the worker that already has relevant cache blocks.
 
 ### NATS Health Check
 
@@ -808,17 +857,17 @@ kubectl get svc -n etcd-system
 
 ## Section 7: Cleanup
 
-### Step 1: Remove Grove Demo Deployment
+### Step 1: Remove Distributed Demo Deployment
 
 ```bash
-# Delete the Grove deployment
-echo "Removing Grove deployment..."
+# Delete the distributed deployment
+echo "Removing distributed Dynamo deployment..."
 NAMESPACE=${NAMESPACE:-dynamo}
 
-kubectl delete dynamographdeployment vllm-grove-demo -n $NAMESPACE
-kubectl delete svc vllm-grove-demo-frontend-np -n $NAMESPACE
+kubectl delete dynamographdeployment vllm-distributed-demo -n $NAMESPACE
+kubectl delete svc vllm-distributed-demo-frontend-np -n $NAMESPACE
 
-echo "✓ Grove deployment removed"
+echo "✓ Distributed deployment removed"
 ```
 
 ### Step 2: Verify Lab 1 Deployment is Still Running
@@ -844,9 +893,9 @@ echo "Test it:"
 echo "  curl http://$NODE_IP:30100/v1/models"
 ```
 
-### Step 3: Remove Grove Infrastructure (Optional)
+### Step 3: Remove Distributed Infrastructure (Optional)
 
-Only remove NATS and etcd if you're done experimenting with Grove:
+Only remove NATS and etcd if you're done experimenting with distributed Dynamo:
 
 ```bash
 # Remove NATS
@@ -864,7 +913,7 @@ kubectl delete podmonitor nats -n nats-system 2>/dev/null || true
 kubectl delete podmonitor etcd -n etcd-system 2>/dev/null || true
 
 echo ""
-echo "✓ Grove infrastructure removed"
+echo "✓ Distributed infrastructure removed"
 echo ""
 echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this lab"
 ```
@@ -875,51 +924,64 @@ echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this 
 
 ### What You Learned
 
-- ✅ Grove architecture and components (NATS, etcd, NIXL)
+- ✅ Distributed Dynamo architecture and components (NATS, etcd, NIXL)
+- ✅ Difference between Grove (operator) and Dynamo (serving framework)
 - ✅ Deploying distributed coordination infrastructure
-- ✅ Creating a Grove-enabled Dynamo deployment
+- ✅ Creating a distributed Dynamo deployment with KV-aware routing
 - ✅ Monitoring NATS and etcd with Grafana
-- ✅ Understanding NATS-based worker discovery
+- ✅ Understanding NATS (metadata) vs NIXL (KV cache data transfer)
 - ✅ Trade-offs between single-node and multi-node setups
 
 ### Key Takeaways
 
-**Grove is Powerful for Multi-Node**:
-- Enables distributed KV cache sharing
+**Architecture Clarity**:
+- **Grove**: Kubernetes Operator (orchestrates Dynamo deployments)
+- **Dynamo**: Inference serving framework (does the actual work)
+- **NATS**: Handles coordination metadata and cache events (small messages)
+- **NIXL**: Transfers actual KV cache data (gigabytes via RDMA/TCP/SSD)
+
+**Distributed Dynamo is Powerful**:
+- Enables KV-aware routing (even on single node with multiple GPUs)
+- NIXL transfers cache data efficiently between workers
 - Improves cache hit rates and throughput
 - Essential for production scale-out scenarios
 
-**Adds Overhead on Single Node**:
-- NATS/etcd resource consumption
-- Message passing latency
-- Coordination complexity
+**Benefits Even on Single Node with Multiple GPUs**:
+- KV-aware Router directs requests to workers with relevant cache
+- Improved cache hit rates compared to random routing
+- Coordination overhead is minimal with NATS
 
 **Production Considerations**:
-- Use Grove when scaling beyond 3-4 nodes
-- Monitor NATS message rates to ensure efficiency
-- Plan for network latency between nodes
+- Use distributed Dynamo when scaling beyond single GPU
+- Monitor NATS message rates for coordination health (not data volume)
+- Plan for network latency between nodes in multi-node setups
 - Consider cache hit patterns for your workload
+- Dynamo 0.8+ supports K8s-native discovery (optional NATS/etcd)
 
 ### Real-World Applications
 
-**When Companies Use Grove**:
+**When Companies Use Distributed Dynamo**:
 - Multi-region LLM deployments
 - High-traffic serving (1000+ RPS)
-- Cost optimization (share expensive cache)
+- Multi-GPU and multi-node clusters
+- Cost optimization (share expensive cache computation)
 - Enterprise multi-tenant platforms
 
-**Grove Alternatives**:
-- Single-node: No distributed cache needed
-- Small clusters (2-3 nodes): Consider Ray's native cache sharing
-- Very large clusters (50+ nodes): May need custom sharding strategies
+**Deployment Options**:
+- **Single GPU**: No distributed coordination needed
+- **Multiple GPUs, single node**: Distributed Dynamo with KV-aware routing beneficial
+- **Small clusters (2-5 nodes)**: Distributed Dynamo provides clear benefits
+- **Large clusters (10+ nodes)**: Distributed Dynamo essential for coordination
+- **Dynamo 0.8+**: Can use K8s-native discovery for simpler deployments
 
 ### Next Steps
 
-- **Experiment**: Try different worker replica counts
-- **Monitor**: Watch NATS/etcd dashboards during traffic
-- **Compare**: Deploy same model without Grove and compare metrics
-- **Scale**: If you have access to multi-node clusters, test Grove benefits
-- **Explore**: Check out Dynamo's advanced Grove features in the docs
+- **Experiment**: Try different worker replica counts to see KV-aware routing
+- **Monitor**: Watch NATS/etcd dashboards during traffic (coordination metadata)
+- **Compare**: Deploy same model without NATS/etcd and compare metrics
+- **Scale**: If you have access to multi-node clusters, test distributed benefits
+- **Learn**: Understand NIXL for KV cache data transfer in Dynamo docs
+- **Explore**: Check out Dynamo 0.8+ features (K8s-native discovery)
 
 ---
 
@@ -951,13 +1013,13 @@ kubectl logs -n etcd-system etcd-0
 # - Network policies blocking ports
 ```
 
-### Workers Not Connecting to Grove
+### Workers Not Connecting to Distributed Infrastructure
 
 ```bash
-# Check worker logs for Grove connection messages
+# Check worker logs for NATS/NIXL connection messages
 NAMESPACE=${NAMESPACE:-dynamo}
 
-kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker | grep -i grove
+kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker | grep -i "nats\|nixl"
 
 # Verify NATS/etcd service endpoints are correct
 kubectl get svc -n nats-system
@@ -966,27 +1028,44 @@ kubectl get svc -n etcd-system
 
 ### No Cache Sharing Observed
 
-**This is expected on single node!** Grove's cache sharing benefits require:
-- Multiple Kubernetes nodes
-- Workers distributed across nodes
-- Repeated queries to build cache
+**This is normal behavior!** Understanding what's actually happening:
 
-On a single node, all workers share memory naturally, so Grove adds overhead without benefit.
+**What NATS Does** (visible in metrics):
+- Shares metadata about cache state between workers
+- Enables KV-aware routing (Router knows which worker has which cache blocks)
+- Low message volume (small coordination packets)
+
+**What NIXL Does** (not visible in NATS metrics):
+- Transfers actual KV cache data (gigabytes of tensors)
+- Uses RDMA, TCP, or CPU/SSD offload
+- Direct worker-to-worker communication
+
+**On Single Node**:
+- Workers can still benefit from KV-aware routing
+- Cache transfers via NIXL are faster (no network)
+- NATS provides coordination, not data transfer
+
+**Benefits Require**:
+- Multiple workers (even on same node)
+- Repeated queries with shared prefixes
+- Workload that generates cache hits
 
 ---
 
 ## Additional Resources
 
-- **Grove Deployment Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/grove.html
+- **Dynamo Deployment Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/
+- **Grove Operator Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/grove.html
 - **Grove GitHub Repository**: https://github.com/NVIDIA/grove
+- **NIXL Documentation**: NVIDIA Inference Transfer Library (check Dynamo docs)
 - **NATS Documentation**: https://docs.nats.io/
 - **etcd Documentation**: https://etcd.io/docs/
 - **NVIDIA Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
 - **Distributed Systems Patterns**: Understanding consensus and coordination
-- **Cache Sharing Strategies**: Martin Kleppmann's "Designing Data-Intensive Applications"
+- **KV Cache Architecture**: Understanding distributed cache strategies
 
 ---
 
-**Congratulations! You've completed Lab 3: Distributed Serving with Grove** 🌲
+**Congratulations! You've completed Lab 3: Distributed Dynamo with Grove Orchestration** 🌲
 
-You now understand the fundamentals of distributed LLM serving and are prepared for multi-node production deployments!
+You now understand the fundamentals of distributed LLM serving, the difference between Grove (operator) and Dynamo (serving framework), and how NATS (metadata) and NIXL (data transfer) work together for distributed coordination!
