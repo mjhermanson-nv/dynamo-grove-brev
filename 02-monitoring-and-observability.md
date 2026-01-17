@@ -245,14 +245,14 @@ Deploy the dashboard as a ConfigMap that Grafana will automatically load:
 
 ```bash
 # Create ConfigMap with dashboard JSON
-echo "Deploying Dynamo Inference Dashboard..."
+echo "Deploying Dynamo Inference Dashboard to $NAMESPACE..."
 
-cat > /tmp/dynamo-inference-dashboard-configmap.yaml << 'EOF'
+cat > /tmp/dynamo-inference-dashboard-configmap.yaml << EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-dynamo-inference
-  namespace: monitoring
+  namespace: $NAMESPACE
   labels:
     grafana_dashboard: "1"
 data:
@@ -266,9 +266,12 @@ sed 's/^/    /' ~/dynamo-brev/resources/dynamo-inference-dashboard.json >> /tmp/
 kubectl apply -f /tmp/dynamo-inference-dashboard-configmap.yaml
 
 echo ""
-echo "✓ Dashboard ConfigMap deployed"
-echo "  Grafana sidecar will auto-load it within ~30 seconds"
+echo "✓ Dashboard ConfigMap deployed to namespace: $NAMESPACE"
+echo "  Cluster-wide Grafana sidecar will auto-discover it within ~30 seconds"
 echo "  Access at: $GRAFANA_URL (look for 'Dynamo Inference Metrics' dashboard)"
+echo ""
+echo "Note: The ConfigMap is created in your namespace ($NAMESPACE), but the"
+echo "      cluster-wide Grafana searches all namespaces for dashboards."
 ```
 
 ---
@@ -510,19 +513,22 @@ echo "✓ Alert rule created"
 echo "  View alerts in Grafana: Alerting section"
 ```
 
-### Exercise 4: Cleanup Monitoring Stack
+### Exercise 4: Cleanup Your Monitoring Resources
 
-When you're done exploring, you can remove the monitoring stack:
-
+When you're done exploring, you can remove the monitoring resources you created:
 
 ```bash
-# Uninstall kube-prometheus-stack (optional - only if you're done)
-# helm uninstall prometheus -n $NAMESPACE
+# Remove PodMonitors and Dashboard ConfigMap from your namespace
+echo "Cleaning up monitoring resources from namespace: $NAMESPACE..."
 
-# Or keep it for future use!
-echo "Monitoring stack is still running in namespace: $NAMESPACE"
-echo "To remove it later, run:"
-echo "  helm uninstall prometheus -n $NAMESPACE"
+kubectl delete podmonitor -n $NAMESPACE --all
+kubectl delete configmap grafana-dashboard-dynamo-inference -n $NAMESPACE 2>/dev/null || true
+
+echo ""
+echo "✓ Monitoring resources removed from your namespace"
+echo ""
+echo "Note: The cluster-wide Prometheus and Grafana remain active."
+echo "      Only your PodMonitors and dashboard ConfigMap were removed."
 ```
 
 ---
@@ -530,20 +536,21 @@ echo "  helm uninstall prometheus -n $NAMESPACE"
 ## Summary
 
 ### What You Learned
-- ✅ How to install namespace-scoped Prometheus and Grafana
+- ✅ How to access cluster-wide Prometheus and Grafana
 - ✅ Understanding Prometheus Operator and PodMonitors
 - ✅ Configuring automatic metrics collection from Dynamo
-- ✅ Creating and viewing Grafana dashboards
+- ✅ Creating and deploying Grafana dashboards via ConfigMaps
 - ✅ Key Dynamo performance metrics
 - ✅ Using Prometheus queries for analysis
 - ✅ Correlating load with performance metrics
 
 ### Key Takeaways
-- **Namespace-scoped monitoring** enables safe multi-tenant clusters
+- **Cluster-wide monitoring** enables shared observability infrastructure
 - **PodMonitors** automatically discover and scrape Dynamo metrics
 - **Prometheus** provides powerful query language for metric analysis
 - **Grafana** offers rich visualizations for real-time monitoring
 - **Key metrics** like TTFT and ITL are critical for LLM performance
+- **Dashboard ConfigMaps** with `grafana_dashboard: "1"` label are auto-discovered by Grafana sidecar
 
 ### Next Steps
 - In **Lab 2**, you'll explore disaggregated serving and monitor the separate prefill/decode workers
@@ -575,10 +582,15 @@ kubectl get podmonitor -n $NAMESPACE -o yaml
 
 ```bash
 # Check if dashboard ConfigMap has correct labels
-kubectl get configmap -n $NAMESPACE grafana-dynamo-dashboard -o yaml | grep -A 5 labels
+kubectl get configmap -n $NAMESPACE grafana-dashboard-dynamo-inference -o yaml | grep -A 5 labels
 
 echo ""
 echo "The ConfigMap should have label: grafana_dashboard: '1'"
+echo ""
+echo "If the ConfigMap exists but dashboard doesn't appear:"
+echo "  1. Wait 30-60 seconds for Grafana sidecar to scan"
+echo "  2. Check Grafana logs for any import errors"
+echo "  3. Verify cluster-wide Grafana has sidecar.dashboards.enabled=true"
 ```
 
 ### Can't Access Grafana
