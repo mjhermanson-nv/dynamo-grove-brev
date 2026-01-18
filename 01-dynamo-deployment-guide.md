@@ -18,12 +18,19 @@ jupyter:
 
 In this lab, you will:
 - Set up Kubernetes cluster with Dynamo platform
-- Deploy Dynamo using cluster-wide operator (recommended)
+- Deploy Dynamo v0.8.0 using K8s-native discovery (simplified architecture)
 - Configure a backend engine using disaggregated serving
 - Test the deployment with OpenAI-compatible API
 - Benchmark the deployment using AI-Perf
 
-## Duration: ~90 minutes
+**What's New in v0.8.0:**
+- ✅ Kubernetes-native service discovery (no etcd required)
+- ✅ TCP transport by default (no NATS required)
+- ✅ Validation webhooks for early error detection
+- ✅ Enhanced observability with unified tracing
+- ✅ Improved disaggregated serving performance
+
+**Duration**: ~90 minutes
 
 ---
 
@@ -48,7 +55,7 @@ Set your configuration variables. **Replace the values below with your own:**
 
 ```bash
 # Set environment variables (use defaults if not already set)
-export RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 export NAMESPACE=${NAMESPACE:-dynamo}
 export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
 
@@ -214,11 +221,12 @@ echo "✓ HuggingFace token secret created"
 ## Section 2: Install Dynamo Platform
 
 ### Objectives
-- Install Dynamo CRDs (Custom Resource Definitions)
-- Install Dynamo platform (etcd, NATS, operator) 
+- Install Dynamo CRDs (Custom Resource Definitions) with validation webhooks
+- Install Dynamo platform (operator with K8s-native discovery)
 - Verify platform components are running
 
-### Architecture
+### Architecture (v0.8.0 Simplified)
+
 ```
 Client Request
       ↓
@@ -228,10 +236,15 @@ Prefill Worker (GPU 0) → Processes prompt → Generates KV cache
       ↓
 Decode Worker (GPU 1) → Uses KV cache → Generates tokens
       ↓
-      ↓
-   etcd + NATS (Coordination & Messaging)
-      ↓
-Dynamo Operator (Manages Resources)
+Response to Client
+
+Infrastructure:
+- Kubernetes EndpointSlices (service discovery)
+- TCP Transport (default, no NATS needed)
+- Dynamo Operator (manages deployments)
+- Validation Webhooks (catch errors early)
+
+Note: NATS/etcd are optional for extreme scale (Lab 3)
 ```
 
 ### Deployment Mode
@@ -266,38 +279,46 @@ fi
 
 ```bash
 # Install Dynamo CRDs (only if not already installed)
-RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
+RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 
-echo "Installing Dynamo CRDs..."
+echo "Installing Dynamo CRDs v$RELEASE_VERSION..."
 helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
 helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
 
 echo ""
 echo "Verifying CRD installation:"
 kubectl get crd | grep nvidia.com
+echo ""
+echo "✓ v0.8.0 CRDs include validation webhooks for early error detection"
 ```
 
 ### Step 2: Install Dynamo Platform
 
-This installs ETCD, NATS, and the Dynamo Operator Controller (cluster-wide by default).
+**Simplified in v0.8.0:** NATS and etcd are now **optional**. Dynamo uses Kubernetes-native service discovery (EndpointSlices) and TCP transport by default, making deployment simpler and reducing infrastructure dependencies.
 
 
 ```bash
-RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
+RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 NAMESPACE=${NAMESPACE:-dynamo}
 
 # Download platform chart
-echo "Downloading Dynamo platform chart..."
+echo "Downloading Dynamo platform chart v$RELEASE_VERSION..."
 helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-$RELEASE_VERSION.tgz
 
-# Install Dynamo platform (cluster-wide by default - recommended)
+# Install Dynamo platform (namespace-scoped, K8s-native discovery)
 echo "Installing Dynamo platform in namespace: $NAMESPACE"
+echo "Using K8s-native discovery (no NATS/etcd required)"
 helm install dynamo-platform \
     dynamo-platform-$RELEASE_VERSION.tgz \
-    --namespace $NAMESPACE
+    --namespace $NAMESPACE \
+    --set dynamo-operator.namespaceRestriction.enabled=true
 
 echo ""
-echo "Platform installation initiated. Waiting for pods to be ready..."
+echo "✓ Platform installation initiated"
+echo "  Discovery: Kubernetes EndpointSlices (native)"
+echo "  Transport: TCP (default in v0.8.0)"
+echo ""
+echo "Waiting for pods to be ready..."
 ```
 
 ### Step 3: Wait for Platform Pods to Be Ready
