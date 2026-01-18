@@ -20,6 +20,8 @@ In this extension to Lab 1, you will:
 - Access the cluster-wide Grafana and Prometheus installation
 - Configure metrics collection from your Dynamo deployment
 - Create and view the Dynamo dashboard in Grafana
+- **New in v0.8.0:** Add Planner observability dashboard
+- **New in v0.8.0:** Explore unified tracing with OpenTelemetry
 - Explore metrics in Prometheus
 - Understand key performance metrics
 
@@ -27,7 +29,7 @@ In this extension to Lab 1, you will:
 
 **Note**: Prometheus and Grafana were installed cluster-wide during the initial setup. You'll verify they're running and configure them to monitor your Dynamo deployment.
 
-## Duration: ~20 minutes
+## Duration: ~30 minutes
 
 ---
 
@@ -338,7 +340,198 @@ echo "✓ Sent 10 test requests - check Grafana dashboard for updated metrics!"
 
 ---
 
-## Section 5: Understanding Key Metrics
+## Section 5: Planner Observability Dashboard (New in v0.8.0)
+
+### Objectives
+- Understand the Planner component in Dynamo's architecture
+- Import and configure the Planner observability dashboard
+- Monitor request routing and KV cache decisions
+
+### What is the Planner?
+
+The **Planner** is Dynamo's intelligent request router that makes critical decisions:
+- Which worker should handle each request (prefill vs. decode)
+- KV cache placement and reuse strategies
+- Load balancing across workers
+- Request batching decisions
+
+In v0.8.0, the Planner has enhanced observability with dedicated metrics for production debugging.
+
+### Import Planner Dashboard
+
+The Planner dashboard helps you understand:
+- Request routing decisions
+- KV cache hit/miss rates
+- Worker selection logic
+- Queue depths and backpressure
+
+**Note:** This dashboard is available starting with Dynamo v0.8.0.
+
+
+```bash
+NAMESPACE=${NAMESPACE:-dynamo}
+GRAFANA_URL="http://$(hostname -I | awk '{print $1}'):30300"
+
+# Create Planner dashboard ConfigMap
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-dynamo-planner
+  namespace: $NAMESPACE
+  labels:
+    grafana_dashboard: "1"
+data:
+  dynamo-planner-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "Dynamo Planner Observability",
+        "tags": ["dynamo", "planner", "v0.8.0"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "title": "Request Routing Decisions",
+            "targets": [
+              {
+                "expr": "rate(dynamo_planner_routing_decisions_total[5m])",
+                "legendFormat": "{{decision_type}}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "KV Cache Hit Rate",
+            "targets": [
+              {
+                "expr": "rate(dynamo_planner_kv_cache_hits_total[5m]) / rate(dynamo_planner_kv_cache_lookups_total[5m])",
+                "legendFormat": "Cache Hit Rate"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Worker Queue Depths",
+            "targets": [
+              {
+                "expr": "dynamo_planner_worker_queue_depth",
+                "legendFormat": "{{worker_id}}"
+              }
+            ],
+            "type": "graph"
+          },
+          {
+            "title": "Planning Latency (p95)",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(dynamo_planner_decision_duration_seconds_bucket[5m]))",
+                "legendFormat": "p95 Planning Latency"
+              }
+            ],
+            "type": "graph"
+          }
+        ]
+      }
+    }
+EOF
+
+echo "✓ Planner dashboard ConfigMap created"
+echo "  Dashboard will auto-import to Grafana"
+echo "  View at: $GRAFANA_URL"
+```
+
+### Access Planner Dashboard
+
+```bash
+echo "Grafana URL: $GRAFANA_URL"
+echo "Username: admin"
+echo "Password: prom-operator"
+echo ""
+echo "Navigate to: Dashboards → Dynamo Planner Observability"
+```
+
+### Key Planner Metrics
+
+| Metric | Description | What to Watch |
+|--------|-------------|---------------|
+| `dynamo_planner_routing_decisions_total` | Routing decisions made | Decision type distribution |
+| `dynamo_planner_kv_cache_hits_total` | KV cache hits | High hit rate = efficient reuse |
+| `dynamo_planner_kv_cache_lookups_total` | Total cache lookups | Cache utilization |
+| `dynamo_planner_worker_queue_depth` | Requests queued per worker | Backpressure indicators |
+| `dynamo_planner_decision_duration_seconds` | Time to make routing decision | Planning overhead |
+
+**Optimization Tip:** High KV cache hit rates (>70%) indicate effective prompt caching and can significantly reduce latency and costs.
+
+---
+
+## Section 6: Unified Tracing with OpenTelemetry (New in v0.8.0)
+
+### Objectives
+- Understand distributed tracing in Dynamo
+- Enable OpenTelemetry tracing
+- Visualize end-to-end request flows
+
+### What is Unified Tracing?
+
+Dynamo v0.8.0 introduces **OpenTelemetry-based distributed tracing** that tracks requests across:
+- Frontend API layer
+- Planner routing decisions
+- Prefill worker execution
+- KV cache transfers
+- Decode worker execution
+
+This gives you **end-to-end visibility** into where time is spent in complex requests.
+
+### Enable Tracing (Optional)
+
+**Note:** This requires a tracing backend like Jaeger or Tempo. For this lab, we'll show the configuration.
+
+
+```bash
+# Example: Enable OpenTelemetry tracing in Dynamo deployment
+# Add these annotations to your DynamoGraphDeployment:
+
+cat <<EOF
+spec:
+  frontend:
+    annotations:
+      opentelemetry.io/enabled: "true"
+      opentelemetry.io/exporter: "otlp"
+      opentelemetry.io/endpoint: "http://jaeger-collector:4317"
+  workers:
+    annotations:
+      opentelemetry.io/enabled: "true"
+EOF
+
+echo "Note: Tracing requires a backend like Jaeger or Tempo"
+echo "For production deployments, integrate with your observability stack"
+```
+
+### What Tracing Shows You
+
+With tracing enabled, you can see:
+
+1. **Request Flow Timeline:**
+   - Frontend receives request: 0ms
+   - Planner makes routing decision: 2ms
+   - Prefill worker starts: 5ms
+   - KV cache transfer: 150ms
+   - Decode worker generates: 300ms
+   - Response returned: 800ms
+
+2. **Bottleneck Identification:**
+   - Slow prefill? → Model loading issue
+   - Slow KV transfer? → Network/NIXL issue
+   - Slow decode? → Batch size or GPU utilization
+
+3. **Cache Effectiveness:**
+   - Trace shows "KV cache hit" span = prompt was cached
+   - No cache hit = full prefill required
+
+**Production Tip:** Combine tracing with metrics for powerful debugging. Use metrics for aggregate patterns, traces for individual request debugging.
+
+---
+
+## Section 7: Understanding Key Metrics
 
 ### Frontend Metrics
 
@@ -398,7 +591,7 @@ rate(dynamo_frontend_output_sequence_tokens_sum[5m]) / rate(dynamo_frontend_outp
 
 ---
 
-## Section 6: Exercises and Exploration
+## Section 8: Exercises and Exploration
 
 ### Exercise 1: Correlate Load with Latency
 
