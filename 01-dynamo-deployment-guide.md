@@ -165,7 +165,7 @@ echo "  You can now pull Dynamo container images"
 
 ```bash
 # Create the namespace
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 kubectl create namespace $NAMESPACE 2>&1 | grep -v "AlreadyExists" || true
 
@@ -181,7 +181,7 @@ Create a Kubernetes secret so that pods can pull images from NGC.
 
 ```bash
 # Get variables
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Create NGC image pull secret
 kubectl create secret docker-registry ngc-secret \
@@ -202,7 +202,7 @@ echo "✓ NGC pull secret created in namespace: $NAMESPACE"
 
 ```bash
 # Get variables
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Create HuggingFace token secret
 kubectl create secret generic hf-token-secret \
@@ -324,7 +324,7 @@ Re-run the following cell until all pods report as "Running"
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Waiting for platform pods to be ready..."
 echo ""
@@ -428,6 +428,10 @@ We'll use a `DynamoGraphDeployment` resource that defines:
 We will create the `disagg_router.yaml` file dynamically with your specific configuration variables:
 
 ```bash
+# Set defaults if not already set
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
+export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
+
 # Create the deployment YAML with environment variables
 cat <<EOF > disagg_router.yaml
 apiVersion: nvidia.com/v1alpha1
@@ -524,7 +528,8 @@ grep "image:" disagg_router.yaml
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+# Set defaults if not already set
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Apply the deployment
 kubectl apply -f disagg_router.yaml --namespace $NAMESPACE
@@ -541,7 +546,7 @@ echo "  - Loading model into GPU memory"
 **CRITICAL**: By default, the deployment is internal-only. We must expose it via a NodePort Service to access it on port `30100`.
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Create NodePort service to expose the frontend
 cat <<EOF | kubectl apply -f -
@@ -574,7 +579,7 @@ echo "Note: The service will be accessible once the frontend pod is running."
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Expected pods:"
 echo "  - vllm-disagg-router-frontend-xxxxx     (Frontend)"
@@ -631,7 +636,7 @@ While waiting for the deployment, you can watch the model loading progress in bo
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Get logs from worker pods
 PREFILL_POD=$(kubectl get pods -n $NAMESPACE | grep vllmprefillworker | awk '{print $1}' | head -1)
@@ -875,7 +880,7 @@ Review the benchmark outputs above. Key metrics to look for:
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Check all pods in your namespace
 kubectl get pods -n $NAMESPACE
@@ -889,7 +894,7 @@ echo "# kubectl describe pod <pod-name> -n $NAMESPACE"
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # View logs from a specific component
 echo "Frontend logs:"
@@ -904,7 +909,7 @@ kubectl logs -l component=VllmDecodeWorker -n $NAMESPACE --tail=50
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Check DynamoGraphDeployment status
 echo "DynamoGraphDeployment status:"
@@ -919,7 +924,7 @@ kubectl logs -l app.kubernetes.io/name=dynamo-operator -n $NAMESPACE --tail=50
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # View recent events in your namespace
 kubectl get events -n $NAMESPACE --sort-by=.lastTimestamp | tail -20
@@ -994,7 +999,7 @@ alias kubectl='microk8s kubectl'
 If your pods are in `Error` or `CrashLoopBackOff` state, use this comprehensive diagnostic:
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "=== Pod Status ==="
 kubectl get pods -n $NAMESPACE | grep vllm
@@ -1291,7 +1296,7 @@ This cleanup is **ONLY** for when you're completely done with:
 
 ```bash
 # Step 1: Delete the Lab 1 deployment (only after Lab 2 is done)
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 kubectl delete dynamographdeployment vllm-disagg-router -n ${NAMESPACE}
 kubectl delete svc vllm-frontend-nodeport -n ${NAMESPACE}
 

@@ -1,0 +1,242 @@
+# Dynamo Grove Workshop Project Rules
+
+## Project Overview
+This is a workshop/tutorial repository for NVIDIA Dynamo and Grove distributed serving.
+Contains Jupyter notebooks (`.ipynb`) paired with markdown files (`.md`) for version control.
+
+## File Organization
+
+### Notebook Structure
+- **Lab 1**: `01-dynamo-deployment-guide.{md,ipynb}` - Basic Dynamo deployment on Kubernetes
+- **Lab 2**: `02-monitoring-and-observability.{md,ipynb}` - Grafana/Prometheus monitoring
+- **Lab 3**: `03-grove-distributed-serving.{md,ipynb}` - Distributed serving with Grove
+- **Resources**: `resources/` - Helper scripts, dashboards, benchmark configs
+- **Artifacts**: `artifacts/` - Benchmark results, logs (gitignored)
+
+## Jupytext Workflow (CRITICAL)
+
+### Golden Rule: Markdown is Authoritative
+1. **Always edit the `.md` file, NOT the `.ipynb` file**
+2. Use `jupytext` to sync changes: `jupytext --to notebook <file>.md`
+3. Or use the sync script: `bash resources/sync-notebooks.sh <file>.md`
+
+### Why This Matters
+- Markdown files are git-friendly (no binary content, clean diffs)
+- Notebooks are generated from markdown
+- Changes to `.ipynb` will be overwritten when syncing from `.md`
+
+### Sync Commands
+```bash
+# Sync single file (markdown → notebook)
+jupytext --to notebook 01-dynamo-deployment-guide.md
+
+# Sync all files
+bash resources/sync-notebooks.sh
+
+# If you accidentally edited .ipynb, extract changes to .md first
+jupytext --to markdown 01-dynamo-deployment-guide.ipynb
+```
+
+## Code Cell Patterns
+
+### Bash Cells
+- Use `%%bash` magic for shell commands
+- **Always export environment variables** for subprocess access:
+  ```bash
+  export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
+  export NAMESPACE=${NAMESPACE:-dynamo}
+  export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
+  ```
+- Set defaults using `${VAR:-default}` pattern for resilience
+- Each cell is isolated - re-declare variables at cell start if needed
+
+### Python Cells
+- Use for interactive input (getpass for secrets)
+- Use `os.environ` to pass variables to bash cells:
+  ```python
+  os.environ['NGC_API_KEY'] = ngc_key
+  ```
+
+### Common Variables
+- `RELEASE_VERSION`: Dynamo version (e.g., "0.8.0")
+- `NAMESPACE`: Kubernetes namespace (e.g., "dynamo")
+- `CACHE_PATH`: Model cache directory (e.g., "/data/huggingface-cache")
+- `NODE_IP`: Kubernetes node IP for service access
+- `NGC_API_KEY`: NVIDIA NGC registry authentication
+- `HF_TOKEN`: HuggingFace token for model downloads
+
+## Kubernetes Patterns
+
+### Resource Naming
+- Deployments: `{model}-{type}` (e.g., `vllm-disagg-router`)
+- Services: `{deployment}-frontend-nodeport`
+- Secrets: `hf-token-secret`, `ngc-secret`
+- Namespaces: User-specific (e.g., `dynamo`, `dynamo-system`)
+
+### Standard Commands
+```bash
+# Check pod status
+kubectl get pods -n $NAMESPACE
+
+# View logs
+kubectl logs -l component=Frontend -n $NAMESPACE --tail=50
+
+# Port forwarding
+kubectl port-forward svc/frontend-service 8000:8000 -n $NAMESPACE
+
+# Apply manifests
+kubectl apply -f manifest.yaml -n $NAMESPACE
+```
+
+### NodePort Pattern
+- Frontend services exposed on NodePort 30100
+- Grafana on NodePort 30080
+- Access via: `http://$NODE_IP:30100`
+
+## Version Control
+
+### Branch Strategy
+- Feature branches: `feature/dynamo-v{version}-updates`
+- Main branch: `main` or `master`
+- Always push to feature branch first
+
+### Commit Message Patterns
+- Fix messages: "Fix {component}: {brief description}"
+- Feature messages: "Add {feature} to {lab}"
+- Update messages: "Update {component} for v{version}"
+- Examples:
+  - ✅ "Fix RELEASE_VERSION variable: add export and set defaults in CRD/platform cells"
+  - ✅ "Update monitoring and observability notebook"
+  - ✅ "Add Grove distributed serving examples for v0.8.0"
+
+### Files to Stage Together
+- Always stage paired files: `.md` AND `.ipynb`
+- Example: `git add 01-dynamo-deployment-guide.{md,ipynb}`
+
+## Error Patterns and Fixes
+
+### Empty Variable Errors
+**Error**: `dynamo-crds-.tgz` (missing version)
+**Fix**: Add `export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}` at cell start
+
+### YAML Parse Errors
+**Error**: `error converting YAML to JSON: yaml: line X: mapping values are not allowed`
+**Cause**: Usually incorrect indentation or missing quotes in heredoc
+**Fix**: Check YAML heredoc syntax, ensure proper variable substitution
+
+### Notebook Sync Issues
+**Error**: Changes to `.ipynb` not appearing
+**Fix**: Edit the `.md` file instead, then run `jupytext --to notebook <file>.md`
+
+## Testing Checklist
+
+### After Making Changes
+1. ✅ Sync markdown to notebook: `jupytext --to notebook <file>.md`
+2. ✅ Verify bash cells have proper exports
+3. ✅ Check YAML manifests for syntax errors
+4. ✅ Test key commands work (kubectl, helm fetch)
+5. ✅ Commit both `.md` and `.ipynb` files
+6. ✅ Push to feature branch
+
+### Before Workshop
+1. ✅ Test complete workflow end-to-end
+2. ✅ Verify all URLs and versions are current
+3. ✅ Check that NodePort services are accessible
+4. ✅ Validate benchmark scripts work
+
+## Workshop-Specific Patterns
+
+### Lab Prerequisites
+- Lab 1: Clean Kubernetes cluster
+- Lab 2: Lab 1 deployment still running (for monitoring)
+- Lab 3: Platform installed (can cleanup Lab 1 deployment)
+
+### Cleanup Warnings
+- Add prominent warnings before destructive operations
+- Example: "⚠️ WARNING: DO NOT RUN THIS DURING THE WORKSHOP"
+- Explain dependencies between labs
+
+### Student Experience
+- Use emoji indicators: 🎓 ✅ ⚠️ 💡
+- Provide copy-paste commands
+- Show expected output examples
+- Include troubleshooting sections
+
+## AI-Perf Benchmarking
+
+### Pattern
+- Run in terminal (not notebook cells - can crash kernel)
+- Use helper script: `resources/run-benchmark.sh {baseline|high|rate}`
+- Save artifacts to `artifacts/` (gitignored)
+
+### Benchmark Types
+- `baseline`: Low concurrency (1 concurrent, 100 requests)
+- `high`: High concurrency (4 concurrent, 200 requests)
+- `rate`: Request rate (10 req/s, 200 requests)
+
+## Security Patterns
+
+### Secrets Handling
+- Use `getpass.getpass()` for interactive secret input
+- Store in environment: `os.environ['SECRET'] = value`
+- Create Kubernetes secrets: `kubectl create secret generic <name>`
+- Never commit secrets to git
+
+### NGC Registry
+- Username: `$oauthtoken`
+- Password: NGC API Key (from ngc.nvidia.com)
+- Login: `helm registry login nvcr.io`
+
+## Documentation Standards
+
+### Code Comments
+- Explain WHY, not WHAT
+- Document non-obvious patterns
+- Provide context for version-specific changes
+
+### Markdown Sections
+- Use clear hierarchy (##, ###)
+- Include prerequisites at section start
+- Provide both explanation and commands
+- Add "What You'll Learn" sections
+
+### Cell Instructions
+- Start with objective: "This cell will..."
+- Explain expected behavior
+- Note timing: "This may take 4-6 minutes..."
+
+## Tools and Commands Reference
+
+### Essential Tools
+- `jupytext`: Notebook/markdown sync
+- `kubectl`: Kubernetes CLI
+- `helm`: Kubernetes package manager
+- `aiperf`: Benchmarking tool
+
+### Helper Scripts
+- `resources/sync-notebooks.sh`: Sync all notebooks
+- `resources/run-benchmark.sh`: Run AI-Perf benchmarks
+- `oneshot.sh`: Complete cluster setup automation
+- `examples/deploy-example-model.sh`: Example deployment
+
+## Common Gotchas
+
+1. **Jupyter cells are isolated** - Each `%%bash` cell is a new shell
+2. **Variables must be exported** - Subprocesses don't inherit non-exported vars
+3. **Edit markdown, not notebooks** - Notebook edits will be overwritten
+4. **Stage both files** - Always commit `.md` and `.ipynb` together
+5. **Version consistency** - Use same version across all manifests
+6. **NodePort access** - Services need NodePort or port-forward to access externally
+
+## Version-Specific Notes
+
+### v0.8.0 Changes
+- K8s-native discovery (no NATS/etcd required for basic deployments)
+- TCP transport by default
+- Validation webhooks in CRDs
+- Simplified disaggregated serving configuration
+
+### Backward Compatibility
+- Keep examples for both v0.7.1 and v0.8.0
+- Note breaking changes clearly
+- Provide migration guidance
