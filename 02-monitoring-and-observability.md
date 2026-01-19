@@ -98,7 +98,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 **IMPORTANT:** Lab 2 requires the deployment from Lab 1 to be running. Let's verify it:
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Checking Lab 1 deployment..."
 echo ""
@@ -171,9 +171,11 @@ Dynamo components expose metrics through:
 The Dynamo operator automatically adds metrics labels to pods:
 
 ```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
 # Check if your Dynamo pods have metrics labels
 echo "Checking Dynamo pod labels:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/metrics-enabled=true --show-labels
+kubectl get pods -n $NAMESPACE -l "nvidia.com/metrics-enabled=true" --show-labels
 
 echo ""
 echo "Look for labels: nvidia.com/metrics-enabled=true"
@@ -184,7 +186,7 @@ echo "Look for labels: nvidia.com/metrics-enabled=true"
 PodMonitors tell Prometheus which pods to scrape for metrics. The Dynamo operator creates them automatically, but they need a label for cluster Prometheus to discover them.
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 echo "Checking PodMonitors..."
 kubectl get podmonitor -n $NAMESPACE
@@ -408,7 +410,7 @@ The Planner dashboard helps you understand:
 
 
 ```bash
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 GRAFANA_URL="http://$(hostname -I | awk '{print $1}'):30300"
 
 # Create Planner dashboard ConfigMap
