@@ -292,15 +292,15 @@ Deploy the dashboard as a ConfigMap that Grafana will automatically load:
 export NAMESPACE=${NAMESPACE:-dynamo}
 export GRAFANA_URL=${GRAFANA_URL:-"http://$(hostname -I | awk '{print $1}'):30080"}
 
-# Create ConfigMap with dashboard JSON
-echo "Deploying Dynamo Inference Dashboard to $NAMESPACE..."
+# Create ConfigMap with dashboard JSON in monitoring namespace (where Grafana looks)
+echo "Deploying Dynamo Inference Dashboard to monitoring namespace..."
 
 cat > /tmp/dynamo-inference-dashboard-configmap.yaml << EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-dynamo-inference
-  namespace: $NAMESPACE
+  namespace: monitoring
   labels:
     grafana_dashboard: "1"
 data:
@@ -314,12 +314,12 @@ sed 's/^/    /' resources/dynamo-inference-dashboard.json >> /tmp/dynamo-inferen
 kubectl apply -f /tmp/dynamo-inference-dashboard-configmap.yaml
 
 echo ""
-echo "✓ Dashboard ConfigMap deployed to namespace: $NAMESPACE"
+echo "✓ Dashboard ConfigMap deployed to monitoring namespace"
 echo "  Cluster-wide Grafana sidecar will auto-discover it within ~30 seconds"
 echo "  Access at: $GRAFANA_URL (look for 'Dynamo Inference Metrics' dashboard)"
 echo ""
-echo "Note: The ConfigMap is created in your namespace ($NAMESPACE), but the"
-echo "      cluster-wide Grafana searches all namespaces for dashboards."
+echo "Note: The ConfigMap is created in the monitoring namespace where"
+echo "      the cluster-wide Grafana sidecar searches for dashboards."
 ```
 
 ---
@@ -416,15 +416,15 @@ The Planner dashboard helps you understand:
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
-GRAFANA_URL="http://$(hostname -I | awk '{print $1}'):30300"
+export GRAFANA_URL=${GRAFANA_URL:-"http://$(hostname -I | awk '{print $1}'):30080"}
 
-# Create Planner dashboard ConfigMap
+# Create Planner dashboard ConfigMap in monitoring namespace
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-dashboard-dynamo-planner
-  namespace: $NAMESPACE
+  namespace: monitoring
   labels:
     grafana_dashboard: "1"
 data:
@@ -480,8 +480,9 @@ data:
     }
 EOF
 
-echo "✓ Planner dashboard ConfigMap created"
-echo "  Dashboard will auto-import to Grafana"
+echo ""
+echo "✓ Planner dashboard ConfigMap created in monitoring namespace"
+echo "  Dashboard will auto-import to Grafana within ~30 seconds"
 echo "  View at: $GRAFANA_URL"
 ```
 
