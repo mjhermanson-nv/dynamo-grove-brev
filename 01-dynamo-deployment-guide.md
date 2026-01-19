@@ -481,7 +481,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type prefill
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
     VllmDecodeWorker:
       envFromSecret: hf-token-secret
       dynamoNamespace: vllm-disagg-router
@@ -513,7 +513,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type decode
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
 EOF
 
 echo "✓ Deployment manifest created: disagg_router.yaml"
@@ -1159,7 +1159,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type prefill
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
     VllmDecodeWorker:
       envFromSecret: hf-token-secret
       dynamoNamespace: vllm-disagg-router
@@ -1191,7 +1191,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --worker-type decode
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
 ```
 
 Deploy the model:
