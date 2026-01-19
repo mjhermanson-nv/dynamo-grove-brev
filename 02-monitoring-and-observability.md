@@ -726,6 +726,27 @@ echo "      Only your PodMonitors and dashboard ConfigMap were removed."
 
 ---
 
+## Known Issues (v0.8.0 Observability)
+
+**⚠️ Monitoring-Specific Issues:**
+
+1. **Planner Dashboard Initial Load**: The Planner dashboard (new in v0.8.0) may show "No data" for the first 2-3 minutes after deployment. Metrics start appearing once requests flow through the system.
+
+2. **OpenTelemetry Trace Sampling**: Default trace sampling is 10% to reduce overhead. For debugging, increase sampling rate in deployment annotations: `opentelemetry.io/sample-rate: "1.0"`.
+
+3. **Grafana Dashboard Auto-Import Delay**: ConfigMaps with `grafana_dashboard: "1"` label may take 30-60 seconds to appear in Grafana. Refresh the dashboards list if not immediately visible.
+
+4. **PodMonitor Label Selectors**: Ensure your PodMonitor `matchLabels` exactly match the pod labels. Case-sensitive. Use `kubectl describe podmonitor` to debug.
+
+**Workarounds:**
+- For missing metrics: Check PodMonitor status: `kubectl get podmonitors -n $NAMESPACE -o yaml`
+- For tracing issues: Verify OTLP endpoint is reachable: `kubectl logs <pod> | grep -i otel`
+- Dashboard not loading: Manually import JSON from ConfigMap
+
+**New in v0.8.0:** Unified tracing and Planner observability are production-ready but may have edge cases. Report issues to the team.
+
+---
+
 ## Summary
 
 ### What You Learned

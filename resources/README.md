@@ -1,65 +1,44 @@
-# Lab 1: Introduction and Kubernetes-Based Deployment
+# Dynamo Lab Resources
 
-This lab introduces Dynamo and guides you through setting up a Kubernetes deployment on a single-node cluster.
+This directory contains cached Helm charts and dashboard configurations for offline use.
 
-## Objectives
+## Helm Charts (Cached for Offline Use)
 
-- Set up your namespace in the Kubernetes cluster
-- Deploy Dynamo platform (operator, etcd, NATS)
-- Deploy your first model using aggregated serving with vLLM
-- Test with OpenAI-compatible API
-- Benchmark the deployment using AI-Perf
+**Current Version:** v0.8.0
 
-## Files
+To update cached charts:
 
-- `lab1-introduction-setup.md` - Main lab guide with detailed instructions
-- `lab1-monitoring.md` - Optional extension for Prometheus and Grafana monitoring
-- `agg_router.yaml` - Kubernetes deployment manifest for aggregated serving
+```bash
+cd resources/
 
-## Prerequisites
+# Download v0.8.0 charts
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-0.8.0.tgz
+helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-platform-0.8.0.tgz
 
-- Single-node Kubernetes cluster (MicroK8s recommended)
-- `kubectl` installed (version 1.24+)
-- `helm` 3.x installed
-- NGC API key from [ngc.nvidia.com](https://ngc.nvidia.com/) (for container image access)
-- HuggingFace token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+# Verify downloads
+ls -lh *.tgz
+```
 
-## Getting Started
+**Note:** The labs use `helm fetch` to download charts directly from NGC. These cached versions are for:
+- Offline environments
+- Faster lab setup (pre-downloaded)
+- Version pinning for reproducibility
 
-1. Verify your kubeconfig is set up correctly:
-   ```bash
-   kubectl version --client
-   kubectl cluster-info
-   ```
+## Dashboard Configurations
 
-2. Follow the guide in `lab1-introduction-setup.md`
+- `dynamo-inference-dashboard.json` - Grafana dashboard for Dynamo metrics (used in Lab 2)
 
-3. Start with Section 1 (Environment Setup) and proceed through each section in order
+## Version History
 
-4. Use the Appendix for complete command reference
+- **v0.8.0** (Jan 2026): K8s-native discovery, validation webhooks, enhanced observability
+- **v0.7.1** (Previous): NATS/etcd required for distributed serving
 
-## Expected Outcomes
+## Updating for New Releases
 
-By the end of this lab, you will have:
-- A working Dynamo deployment serving a model via aggregated serving
-- Understanding of Kubernetes-based aggregated serving architecture
-- Experience with DynamoGraphDeployment CRD
-- Baseline performance benchmarks using AI-Perf
-- **(Optional)** Prometheus and Grafana monitoring stack with Dynamo dashboards
+When a new Dynamo version is released:
 
-## Time Estimate
-
-- Main lab: ~90 minutes
-- Monitoring extension: +30 minutes (optional)
-
-## Key Concepts
-
-- **Aggregated serving**: All model layers on same GPU(s), simpler topology
-- **KV-cache routing**: Intelligent load balancing based on KV cache state
-- **DynamoGraphDeployment**: Kubernetes Custom Resource for defining inference deployments
-- **Single-node cluster**: All Kubernetes components and workloads run on one machine
-
-## Next Lab
-
-Proceed to Lab 2 for disaggregated serving and advanced configurations
-
+1. Download new chart versions (see commands above)
+2. Update labs to reference new version in `RELEASE_VERSION` variable
+3. Test all labs with new charts
+4. Archive old versions (optional): `mkdir archive/ && mv *-0.7.1.tgz archive/`
+5. Update this README with version notes

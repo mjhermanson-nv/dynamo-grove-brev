@@ -1029,6 +1029,33 @@ echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this 
 
 ---
 
+## Known Issues (v0.8.0 Distributed Serving)
+
+**⚠️ Distributed Deployment Issues:**
+
+1. **K8s-native Discovery Propagation**: EndpointSlices may take 5-15 seconds to propagate in large clusters (20+ nodes). First requests may fail with "no available workers" until discovery completes.
+
+2. **NIXL KV Cache Transfer on ARM**: RDMA support on ARM-based nodes (Graviton, Ampere) is experimental in v0.8.0. Fall back to TCP transport if encountering issues.
+
+3. **Multi-Frontend KV-Aware Routing**: In some edge cases with >10 frontend replicas, routing metadata may be stale for 1-2 seconds, resulting in suboptimal cache hits (not failures, just less efficient).
+
+4. **NATS/etcd Compatibility**: If mixing K8s-native and NATS/etcd modes in the same cluster, ensure workers use consistent discovery method. Mixed modes are not supported.
+
+5. **Worker Gang Scheduling**: In v0.8.0, workers must all be ready before accepting traffic. If one worker pod fails, the entire deployment may be blocked. Use `kubectl describe dynamographdeployment` to debug.
+
+**Workarounds:**
+- Discovery delays: Add `--wait-for-workers-timeout=30s` flag to frontend
+- NIXL issues: Set `NIXL_TRANSPORT=tcp` env var to force TCP mode
+- Routing staleness: Reduce frontend replicas to 3-5 for optimal cache awareness
+- Gang scheduling: Use pod disruption budgets and ensure adequate node resources
+
+**Migration from v0.7.x:**
+- K8s-native discovery is backward compatible
+- Existing NATS/etcd deployments continue to work
+- Can upgrade in-place, but test K8s-native in staging first
+
+---
+
 ## Summary
 
 ### What You Learned

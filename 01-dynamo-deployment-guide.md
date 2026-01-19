@@ -1029,6 +1029,27 @@ kubectl get events -n $NAMESPACE --sort-by=.lastTimestamp | tail -20
 
 ---
 
+## Known Issues (v0.8.0)
+
+**⚠️ Important Notes for Dynamo v0.8.0:**
+
+1. **Validation Webhook Timing**: In rare cases, validation webhooks may reject valid configurations during high cluster load. If deployment fails with validation errors, wait 30 seconds and retry.
+
+2. **K8s-native Discovery Cold Start**: First request after deployment may take 5-10s longer as EndpointSlices propagate. Subsequent requests are fast.
+
+3. **TCP Transport Port Conflicts**: If using custom ports, ensure they don't conflict with existing services. Default ports (8000, 8001) are usually safe.
+
+4. **Model Loading on Multiple GPUs**: For multi-GPU setups, ensure sufficient shared memory (`/dev/shm`) is available. Add `--shm-size=2g` to worker pod spec if needed.
+
+**Workarounds:**
+- For webhook issues: Add `--wait --timeout=5m` to helm installs
+- For discovery delays: Add readiness probe with longer `initialDelaySeconds`
+- Check [GitHub Issues](https://github.com/ai-dynamo/dynamo/issues) for latest updates
+
+**Fixed in v0.8.1+:** Many of these issues are addressed in patch releases. Check release notes for updates.
+
+---
+
 ## Summary
 
 ### What You Learned
