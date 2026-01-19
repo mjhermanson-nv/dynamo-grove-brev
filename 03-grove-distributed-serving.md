@@ -121,7 +121,7 @@ Note: Workers require GPU nodes. Frontends don't require GPUs
 
 **NIXL (NVIDIA Inference Transfer Library)**: Handles actual KV cache data transfer:
 - Uses high-speed transports (RDMA, TCP, or CPU/SSD offload)
-- Transfers gigabytes of tensor data between workers
+- Transfers large tensor data between workers efficiently
 - Direct worker-to-worker communication
 - Works with both K8s-native and NATS/etcd modes
 
@@ -203,14 +203,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 ### Understanding Dynamo's Distributed Architecture
 
-Dynamo (orchestrated by Grove) automatically uses NATS and etcd for distributed coordination when they are available in the cluster. The deployment will:
+Dynamo (orchestrated by Grove) uses Kubernetes-native service discovery to coordinate distributed components. The deployment works as follows:
 
-**1. Workers register via NATS**: Each worker announces itself and its cache state
-**2. Frontend discovers workers**: The frontend finds workers through NATS service discovery
-**3. KV-aware Router**: Routes requests to workers with relevant cached data
-**4. NIXL handles KV cache data**: Workers transfer actual KV cache tensors via NIXL (RDMA/TCP), not through NATS
+**1. Workers register with Kubernetes**: Each worker pod registers itself via K8s services
+**2. Frontend discovers workers**: The frontend uses EndpointSlices to find available workers
+**3. KV-aware Router**: Routes requests intelligently across workers
+**4. NIXL handles KV cache data**: Workers transfer KV cache tensors directly via NIXL (RDMA/TCP)
 
-**Note**: In Dynamo 0.8+, Kubernetes-native discovery (EndpointSlices) is available as an alternative to NATS/etcd for simpler deployments without KV-aware routing.
+**Note**: For extreme scale deployments, NATS/etcd can be added for advanced coordination (see Appendix A & B).
 
 ### Step 1: Create Distributed Dynamo Deployment
 
