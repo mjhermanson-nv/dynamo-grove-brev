@@ -201,9 +201,9 @@ if [ "$PODMONITOR_COUNT" -gt 0 ]; then
     
     # Ensure they have the required label for Prometheus discovery
     echo "Labeling for Prometheus discovery..."
-    kubectl label podmonitor -n $NAMESPACE dynamo-frontend release=kube-prometheus-stack --overwrite 2>/dev/null || true
-    kubectl label podmonitor -n $NAMESPACE dynamo-planner release=kube-prometheus-stack --overwrite 2>/dev/null || true
-    kubectl label podmonitor -n $NAMESPACE dynamo-worker release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    kubectl label podmonitor dynamo-frontend -n $NAMESPACE release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    kubectl label podmonitor dynamo-planner -n $NAMESPACE release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    kubectl label podmonitor dynamo-worker -n $NAMESPACE release=kube-prometheus-stack --overwrite 2>/dev/null || true
     
     echo ""
     echo "✓ PodMonitors ready - Prometheus will scrape metrics within 1-2 minutes"
