@@ -19,10 +19,9 @@ jupyter:
 In this extension to Lab 1, you will:
 - Access the cluster-wide Grafana and Prometheus installation
 - Configure metrics collection from your Dynamo deployment
-- Create and view the Dynamo dashboard in Grafana
-- **New in v0.8.0:** Add Planner observability dashboard
-- **New in v0.8.0:** Explore unified tracing with OpenTelemetry
-- Explore metrics in Prometheus
+- Create and view the Dynamo inference dashboard in Grafana
+- Add Planner observability dashboard to monitor request routing
+- Explore unified tracing with OpenTelemetry for debugging
 - Understand key performance metrics
 
 **Prerequisites**: Complete Lab 1 (Introduction and Kubernetes-Based Deployment)
@@ -94,7 +93,44 @@ echo "✓ Environment configured for monitoring"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ```
 
-### Step 2: Verify Monitoring Stack is Running
+### Step 2: Verify Lab 1 Deployment is Running
+
+**IMPORTANT:** Lab 2 requires the deployment from Lab 1 to be running. Let's verify it:
+
+```bash
+NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "Checking Lab 1 deployment..."
+echo ""
+kubectl get dynamographdeployment -n $NAMESPACE
+echo ""
+kubectl get pods -n $NAMESPACE | grep vllm
+echo ""
+
+# Check if deployment exists
+if kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE &>/dev/null; then
+    echo "✓ Lab 1 deployment found"
+    
+    # Check if pods are ready
+    READY_PODS=$(kubectl get pods -n $NAMESPACE | grep vllm | grep "1/1" | wc -l)
+    if [ "$READY_PODS" -ge 2 ]; then
+        echo "✓ Deployment is healthy and ready to monitor"
+    else
+        echo "⚠️  Some pods are not ready yet. Wait for them to reach 1/1 Running status."
+        echo "   Re-run this cell to check status again."
+    fi
+else
+    echo "❌ Lab 1 deployment not found!"
+    echo ""
+    echo "Please complete Lab 1 first:"
+    echo "  1. Go back to Lab 1"
+    echo "  2. Complete Section 3: Deploy Distributed Model"
+    echo "  3. Wait for pods to be ready (1/1 Running)"
+    echo "  4. Return to this lab"
+fi
+```
+
+### Step 3: Verify Monitoring Stack is Running
 
 Check that Prometheus and Grafana pods are running:
 
@@ -143,38 +179,41 @@ echo ""
 echo "Look for labels: nvidia.com/metrics-enabled=true"
 ```
 
-### Step 2: Check if PodMonitors Were Created
+### Step 2: Verify PodMonitors for Prometheus
 
-The Dynamo operator should automatically create PodMonitor resources:
+PodMonitors tell Prometheus which pods to scrape for metrics. The Dynamo operator creates them automatically, but they need a label for cluster Prometheus to discover them.
 
 ```bash
-# List PodMonitors in your namespace
-echo "PodMonitors in namespace $NAMESPACE:"
+NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "Checking PodMonitors..."
 kubectl get podmonitor -n $NAMESPACE
-
 echo ""
-echo "You should see PodMonitors for frontend and worker components"
-echo "These are automatically discovered by the cluster Prometheus"
+
+# Check if PodMonitors exist
+PODMONITOR_COUNT=$(kubectl get podmonitor -n $NAMESPACE 2>/dev/null | grep -c dynamo || echo "0")
+
+if [ "$PODMONITOR_COUNT" -gt 0 ]; then
+    # Show configuration for one PodMonitor
+    echo "PodMonitor configuration (example: dynamo-frontend):"
+    kubectl get podmonitor dynamo-frontend -n $NAMESPACE -o jsonpath='{.spec}' | python3 -m json.tool
+    echo ""
+    
+    # Ensure they have the required label for Prometheus discovery
+    echo "Labeling for Prometheus discovery..."
+    kubectl label podmonitor -n $NAMESPACE dynamo-frontend release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    kubectl label podmonitor -n $NAMESPACE dynamo-planner release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    kubectl label podmonitor -n $NAMESPACE dynamo-worker release=kube-prometheus-stack --overwrite 2>/dev/null || true
+    
+    echo ""
+    echo "✓ PodMonitors ready - Prometheus will scrape metrics within 1-2 minutes"
+else
+    echo "⚠️  PodMonitors not found - deployment may still be starting"
+    echo "   Wait 30 seconds and re-run this cell"
+fi
 ```
 
-### Step 3: Label PodMonitors for Prometheus Discovery
-
-The cluster Prometheus requires PodMonitors to have a specific label. Let's add it:
-
-```bash
-# Add the required label to Dynamo PodMonitors
-echo "Labeling PodMonitors for Prometheus discovery..."
-
-kubectl label podmonitor -n $NAMESPACE dynamo-frontend release=kube-prometheus-stack --overwrite
-kubectl label podmonitor -n $NAMESPACE dynamo-planner release=kube-prometheus-stack --overwrite
-kubectl label podmonitor -n $NAMESPACE dynamo-worker release=kube-prometheus-stack --overwrite
-
-echo ""
-echo "✓ PodMonitors labeled - Prometheus will now discover and scrape metrics"
-echo "  It may take 1-2 minutes for metrics to appear in Grafana"
-```
-
-### Step 4: Manually Test Metrics Endpoint
+### Step 3: Test Metrics Endpoint 
 
 Let's verify metrics are accessible:
 
@@ -194,7 +233,7 @@ else
 fi
 ```
 
-### Step 5: Send Test Traffic to Generate Metrics
+### Step 4: Send Test Traffic to Generate Metrics
 
 Let's generate some traffic to populate metrics by sending requests to the Dynamo frontend:
 
@@ -443,10 +482,10 @@ echo "  View at: $GRAFANA_URL"
 
 ```bash
 echo "Grafana URL: $GRAFANA_URL"
-echo "Username: admin"
-echo "Password: prom-operator"
 echo ""
 echo "Navigate to: Dashboards → Dynamo Planner Observability"
+echo ""
+echo "(Anonymous access enabled - no login required)"
 ```
 
 ### Key Planner Metrics

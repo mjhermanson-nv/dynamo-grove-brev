@@ -18,17 +18,16 @@ jupyter:
 
 In this lab, you will:
 - Set up Kubernetes cluster with Dynamo platform
-- Deploy Dynamo v0.8.0 using K8s-native discovery (simplified architecture)
-- Configure a backend engine using disaggregated serving
+- Deploy Dynamo, NVIDIA's inference serving framework
+- Configure a model using disaggregated serving (separate prefill and decode workers)
 - Test the deployment with OpenAI-compatible API
 - Benchmark the deployment using AI-Perf
 
-**What's New in v0.8.0:**
-- ✅ Kubernetes-native service discovery (no etcd required)
-- ✅ TCP transport by default (no NATS required)
-- ✅ Validation webhooks for early error detection
-- ✅ Enhanced observability with unified tracing
-- ✅ Improved disaggregated serving performance
+**What You'll Learn:**
+- How to deploy Dynamo on Kubernetes
+- Understanding disaggregated serving architecture
+- Using Dynamo's OpenAI-compatible API
+- Monitoring inference performance
 
 **Duration**: ~90 minutes
 
@@ -50,11 +49,11 @@ Before starting, ensure you have:
 
 ### Step 2: Set Configuration Variables
 
-Set your configuration variables. **Replace the values below with your own:**
+Run this to set up your environment. The defaults work for most users:
 
 
 ```bash
-# Set environment variables (use defaults if not already set)
+# Set environment variables (these defaults work for most setups)
 export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 export NAMESPACE=${NAMESPACE:-dynamo}
 export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
@@ -97,7 +96,7 @@ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nv
 
 ### Step 4: Set Up NGC Authentication
 
-To access NVIDIA's Dynamo container images, you need to authenticate with NGC (NVIDIA GPU Cloud).
+To access NVIDIA's Dynamo container images, you need to authenticate with NGC.
 
 #### Get Your NGC API Key
 
@@ -240,11 +239,12 @@ Response to Client
 
 Infrastructure:
 - Kubernetes EndpointSlices (service discovery)
-- TCP Transport (default, no NATS needed)
+- TCP Transport (direct worker connections)
 - Dynamo Operator (manages deployments)
 - Validation Webhooks (catch errors early)
 
-Note: NATS/etcd are optional for extreme scale (Lab 3)
+Note: This basic deployment doesn't use NATS or etcd.
+      Lab 3 covers distributed deployments
 ```
 
 ### Deployment Mode
@@ -256,40 +256,28 @@ We're using the **recommended cluster-wide deployment** (default). According to 
 - Install a **namespace-scoped Dynamo operator** that only manages resources in your namespace
 - The CRDs are cluster-wide and should already be installed (check first)
 
-### Step 1: Check if Dynamo CRDs Are Installed
+### Step 1: Install Dynamo CRDs
 
-**Note:** CRDs are cluster-wide resources and only need to be installed **once per cluster**. If already installed, skip to Step 2.
+**Note:** CRDs are cluster-wide resources and only need to be installed **once per cluster**. This step checks if they exist and installs them if needed.
 
 
 ```bash
-# Check if CRDs already exist
+# Check if CRDs already exist, install if not
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
     echo "✓ CRDs already installed"
     kubectl get crd | grep nvidia.com
 else
-    echo "⚠️  CRDs not found. Ask instructor to install them, or proceed with Step 1b"
+    echo "Installing Dynamo CRDs v$RELEASE_VERSION..."
+    helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
+    helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
+    
+    echo ""
+    echo "Verifying CRD installation:"
+    kubectl get crd | grep nvidia.com
+    echo ""
+    echo "✓ CRDs include validation webhooks for early error detection"
 fi
-```
-
-### Step 1b: Install CRDs (Optional - Instructor May Do This)
-
-**Skip this step if CRDs are already installed.** If needed, run:
-
-
-```bash
-# Install Dynamo CRDs (only if not already installed)
-RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
-
-echo "Installing Dynamo CRDs v$RELEASE_VERSION..."
-helm fetch https://helm.ngc.nvidia.com/nvidia/ai-dynamo/charts/dynamo-crds-$RELEASE_VERSION.tgz
-helm install dynamo-crds dynamo-crds-$RELEASE_VERSION.tgz --namespace default
-
-echo ""
-echo "Verifying CRD installation:"
-kubectl get crd | grep nvidia.com
-echo ""
-echo "✓ v0.8.0 CRDs include validation webhooks for early error detection"
 ```
 
 ### Step 2: Install Dynamo Platform
@@ -626,51 +614,6 @@ if [ $ELAPSED -ge $TIMEOUT ]; then
 fi
 ```
 
-### Step 3b: Troubleshoot Pod Issues (If Pods Are Crashing)
-
-If your pods are in `Error` or `CrashLoopBackOff` state, run this cell to diagnose:
-
-```bash
-NAMESPACE=${NAMESPACE:-dynamo}
-
-echo "=== Pod Status ==="
-kubectl get pods -n $NAMESPACE | grep vllm
-echo ""
-
-echo "=== GPU Availability ==="
-kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu,GPU-Allocatable:.status.allocatable.nvidia\\.com/gpu
-echo ""
-
-echo "=== Checking Secrets ==="
-kubectl get secret hf-token-secret -n $NAMESPACE &>/dev/null && echo "✓ HF token secret exists" || echo "✗ HF token secret missing!"
-kubectl get secret ngc-secret -n $NAMESPACE &>/dev/null && echo "✓ NGC secret exists" || echo "✗ NGC secret missing!"
-echo ""
-
-echo "=== Prefill Worker Logs (last 30 lines) ==="
-PREFILL_POD=$(kubectl get pods -n $NAMESPACE | grep vllmprefillworker | awk '{print $1}' | head -1)
-if [ -n "$PREFILL_POD" ]; then
-    kubectl logs $PREFILL_POD -n $NAMESPACE --tail=30
-else
-    echo "No prefill pod found"
-fi
-echo ""
-
-echo "=== Decode Worker Logs (last 30 lines) ==="
-DECODE_POD=$(kubectl get pods -n $NAMESPACE | grep vllmdecodeworker | awk '{print $1}' | head -1)
-if [ -n "$DECODE_POD" ]; then
-    kubectl logs $DECODE_POD -n $NAMESPACE --tail=30
-else
-    echo "No decode pod found"
-fi
-echo ""
-
-echo "=== Common Issues ==="
-echo "1. If 'insufficient gpu' error: You need 2 GPUs for disaggregated serving"
-echo "2. If 'HF_TOKEN' error: Make sure you created the hf-token-secret"
-echo "3. If 'ImagePullBackOff': Check NGC secret and credentials"
-echo "4. If model download errors: Check network connectivity to huggingface.co"
-```
-
 ### Step 4: View Worker Logs (Optional)
 
 While waiting for the deployment, you can watch the model loading progress in both workers.
@@ -719,45 +662,13 @@ fi
 
 ### Testing Strategy
 Once your deployment is running (`1/1 Ready`), you'll:
-1. Forward the frontend service port to localhost
+1. Connect to the frontend via NodePort (already exposed on port 30100)
 2. Test with curl commands
 3. Verify response format and functionality
 
-### Step 1: Set Up Port Forwarding
+### Step 1: Get Frontend URL
 
-Forward the service port to localhost (run in background):
-
-
-
-### Understanding Disaggregated Serving Trade-offs
-
-Now that your deployment is running, let's understand when and why disaggregated serving is beneficial:
-
-**When to Use Disaggregated:**
-- ✅ **Large models** (70B+ parameters) where compute and memory demands differ
-- ✅ **High throughput scenarios** where prefill and decode have different scaling needs
-- ✅ **Long input prompts** where prefill becomes a bottleneck
-- ✅ **Production deployments** with predictable traffic patterns
-
-**When Aggregated is Better:**
-- ✅ **Small to medium models** (< 13B parameters) like we're using here
-- ✅ **Development and testing** where simplicity matters
-- ✅ **Unpredictable workloads** where flexibility is key
-- ✅ **Resource-constrained environments** with limited GPUs
-
-**Key Differences:**
-
-| Aspect | Aggregated | Disaggregated |
-|--------|-----------|---------------|
-| Architecture | Single worker type | Separate prefill & decode |
-| GPU Utilization | Both phases on same GPU | Specialized per GPU |
-| Scaling | Scale all workers together | Scale prefill/decode independently |
-| Complexity | Simpler | More complex coordination |
-| Latency | Lower for small batches | Better for large throughput |
-| Resource Usage | More flexible | More optimized |
-
-**In this lab:**
-We're using disaggregated serving with a small model (1.5B) primarily for **educational purposes** to demonstrate the architecture pattern. In production, you would typically use aggregated serving for models this size.
+The frontend is already exposed via NodePort on port 30100 (set up in Step 2b). Get the connection URL:
 
 ```bash
 # Get the node IP
@@ -942,27 +853,12 @@ Review the benchmark outputs above. Key metrics to look for:
 
 
 
-### Cleanup
+---
 
-When you're done with Lab 1, clean up your deployment:
-
-
-```bash
-NAMESPACE=${NAMESPACE:-dynamo}
-
-# Delete the deployment
-kubectl delete dynamographdeployment vllm-disagg-router -n $NAMESPACE
-
-# Delete the NodePort service
-kubectl delete svc vllm-frontend-nodeport -n $NAMESPACE
-
-echo ""
-echo "✓ Deployment and service deleted"
-echo "Verifying pods are terminating:"
-kubectl get pods -n $NAMESPACE
-```
-
-**Note:** Keep your namespace and platform for Lab 2! Only delete the deployment and service, not the namespace.
+**Next Steps:**
+- Continue to **Lab 2: Monitoring and Observability** to add dashboards and metrics
+- Or skip to **Lab 3: Distributed Serving** for multi-GPU deployments
+- See **Appendix** for cleanup commands (only if completely done with all labs)
 
 ## Troubleshooting
 
@@ -1082,6 +978,51 @@ This appendix provides complete commands for each section. Use these as a refere
 
 ```bash
 alias kubectl='microk8s kubectl'
+```
+
+### A0. Troubleshooting Pod Issues
+
+If your pods are in `Error` or `CrashLoopBackOff` state, use this comprehensive diagnostic:
+
+```bash
+NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "=== Pod Status ==="
+kubectl get pods -n $NAMESPACE | grep vllm
+echo ""
+
+echo "=== GPU Availability ==="
+kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu,GPU-Allocatable:.status.allocatable.nvidia\\.com/gpu
+echo ""
+
+echo "=== Checking Secrets ==="
+kubectl get secret hf-token-secret -n $NAMESPACE &>/dev/null && echo "✓ HF token secret exists" || echo "✗ HF token secret missing!"
+kubectl get secret ngc-secret -n $NAMESPACE &>/dev/null && echo "✓ NGC secret exists" || echo "✗ NGC secret missing!"
+echo ""
+
+echo "=== Prefill Worker Logs (last 30 lines) ==="
+PREFILL_POD=$(kubectl get pods -n $NAMESPACE | grep vllmprefillworker | awk '{print $1}' | head -1)
+if [ -n "$PREFILL_POD" ]; then
+    kubectl logs $PREFILL_POD -n $NAMESPACE --tail=30
+else
+    echo "No prefill pod found"
+fi
+echo ""
+
+echo "=== Decode Worker Logs (last 30 lines) ==="
+DECODE_POD=$(kubectl get pods -n $NAMESPACE | grep vllmdecodeworker | awk '{print $1}' | head -1)
+if [ -n "$DECODE_POD" ]; then
+    kubectl logs $DECODE_POD -n $NAMESPACE --tail=30
+else
+    echo "No decode pod found"
+fi
+echo ""
+
+echo "=== Common Issues ==="
+echo "1. If 'insufficient gpu' error: You need 2 GPUs for disaggregated serving"
+echo "2. If 'HF_TOKEN' error: Make sure you created the hf-token-secret"
+echo "3. If 'ImagePullBackOff': Check NGC secret and credentials"
+echo "4. If model download errors: Check network connectivity to huggingface.co"
 ```
 
 ### A1. Environment Setup
@@ -1328,22 +1269,31 @@ kubectl get pods -n ${NAMESPACE} -w
 kubectl logs -l component=VllmDecodeWorker -n ${NAMESPACE} --tail=20
 ```
 
-### A7. Cleanup
+### A7. Cleanup (⚠️ ONLY AFTER COMPLETING ALL LABS)
 
+**⚠️ WARNING: DO NOT RUN THIS DURING THE WORKSHOP**
+
+This cleanup is **ONLY** for when you're completely done with:
+- ✅ Lab 1: Deployment
+- ✅ Lab 2: Monitoring (requires Lab 1 deployment running)
+- ✅ Lab 3: Distributed Serving (requires platform installed)
+
+**If you're continuing to Lab 2 or Lab 3, DO NOT run these commands.**
 
 ```bash
-# Delete the deployment
+# Step 1: Delete the Lab 1 deployment (only after Lab 2 is done)
+NAMESPACE=${NAMESPACE:-dynamo}
 kubectl delete dynamographdeployment vllm-disagg-router -n ${NAMESPACE}
-
-# Delete the NodePort service
 kubectl delete svc vllm-frontend-nodeport -n ${NAMESPACE}
 
-# Verify pods are terminating
+# Step 2: Verify pods are terminating
 kubectl get pods -n ${NAMESPACE}
 
-# (Optional) Keep your namespace for Lab 2
-# To completely clean up (only if you're done with all labs):
+# Step 3: (Optional) Complete cleanup after ALL labs
+# This removes everything including the platform:
 # kubectl delete namespace ${NAMESPACE}
+# helm uninstall dynamo-platform -n ${NAMESPACE}
+# helm uninstall dynamo-crds -n default
 ```
 
 ### A8. Troubleshooting

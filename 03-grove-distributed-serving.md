@@ -17,23 +17,23 @@ jupyter:
 ## Overview
 
 In this lab, you will:
-- **Primary Path:** Deploy distributed Dynamo using K8s-native discovery (simplified, v0.8.0)
+- Deploy distributed Dynamo across multiple GPUs or nodes
 - Understand multi-GPU and multi-node serving architectures
 - Enable distributed KV cache awareness and transfer via NIXL
 - Monitor distributed components with Grafana
-- **Optional Advanced:** Deploy with NATS/etcd for extreme scale (multi-region, 100+ nodes)
+- Learn when to add optional infrastructure (NATS/etcd) for large-scale deployments
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
-**What's New in v0.8.0:**
-- ✅ K8s-native discovery (EndpointSlices) - no etcd needed
-- ✅ TCP transport - no NATS needed
-- ✅ Simpler deployment for 2-50 node clusters
-- ✅ NATS/etcd now optional for extreme scale only
+**What You'll Learn:**
+- How Dynamo discovers and coordinates workers across GPUs/nodes
+- KV cache sharing between workers for improved performance
+- Two deployment modes: Standard (built-in) vs Advanced (NATS/etcd)
+- Monitoring distributed inference metrics
 
 **Note**: Distributed Dynamo is designed for multi-node Kubernetes clusters or single nodes with multiple GPUs. While we'll deploy it on a single node for learning purposes, maximum benefits are realized when scaling across multiple nodes with high cache hit workloads.
 
-## Duration: ~45 minutes (K8s-native path) / ~75 minutes (with optional NATS/etcd)
+## Duration: ~45 minutes (standard path) / ~75 minutes (with optional NATS/etcd)
 
 ---
 
@@ -51,7 +51,7 @@ In this lab, you will:
 - **Distributed KV cache transfer** between workers via NIXL (NVIDIA Inference Transfer Library)
 - **Coordination and discovery** using either:
   - **K8s-native (v0.8.0+)**: EndpointSlices + TCP (simpler, recommended for most use cases)
-  - **NATS/etcd (optional)**: For extreme scale (100+ nodes, multi-region, complex topologies)
+  - **NATS/etcd (optional)**: For extreme scale (very large clusters, multi-region, complex topologies)
 
 ### Architecture: K8s-Native (Recommended for Most Users)
 
@@ -94,65 +94,16 @@ In this lab, you will:
               └───────────────────────┘
 
 Benefits:
-- Simpler: No additional infrastructure (NATS/etcd)
-- Lower latency: Direct TCP connections
-- Easier ops: Fewer moving parts
-- Sufficient for 2-50 node clusters
+- Built-in: Uses Kubernetes service discovery (no extra components)
+- Fast: Direct TCP connections between components
+- Reliable: Fewer moving parts to maintain
+- Recommended for most deployments
 
-Note: Workers typically run on GPU nodes (4-6), separate from
-      CPU-only frontend nodes (1-3). In smaller clusters, they
-      may share nodes with frontends.
-```
+Note: Workers require GPU nodes. Frontends don't require GPUs
+      and can run on any node. The diagram shows them on separate
+      nodes, but they can share nodes in smaller clusters.
 
-### Architecture: NATS/etcd (Optional - For Extreme Scale)
-
-```
-               ┌────────────────────────────┐
-               │  Cloud Load Balancer       │
-               │  or Ingress Controller     │
-               └──────────┬─────────────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-    │Frontend 1│    │Frontend 2│    │Frontend 3│
-    │ (Node 1) │    │ (Node 2) │    │ (Node 3) │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │                │                │
-         └────────────────┼────────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  NATS Message Bus     │
-              │  (Metadata, Routing,  │
-              │   Cache Awareness)    │
-              └───────────┬───────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  etcd (Coordination)  │
-              │  (Service Discovery)  │
-              └───────────┬───────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
-    │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
-    │  +GPU    │    │  +GPU    │    │  +GPU    │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │                │                │
-         └────────────────┼────────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  NIXL (KV Cache       │
-              │   Data Transfer)      │
-              │  RDMA/TCP/SSD         │
-              └───────────────────────┘
-
-When to use NATS/etcd:
-- 100+ node clusters
-- Multi-region deployments
-- Complex custom routing logic
-- Advanced cache policies
+**For NATS/etcd architecture (extreme scale deployments)**, see Appendix A.
 ```
 
 ### Key Concepts
@@ -183,58 +134,24 @@ When to use NATS/etcd:
 **Optional NATS/etcd (for extreme scale)**: Advanced coordination:
 - **NATS**: Pub/sub messaging for metadata (cache events, routing tables)
 - **etcd**: Distributed configuration and service discovery
-- **When to use**: 100+ nodes, multi-region, custom routing policies
+- **When to use**: Very large clusters, multi-region, custom routing policies
 - **Note**: NATS does NOT transfer KV cache data (NIXL does that)
 - Router directs requests to workers with relevant cached prefixes
 - Improves cache hit rates even on single node with multiple GPUs
 - Workers transfer actual cache data via NIXL when needed
 
-### How Multiple Frontends Work
+### Understanding Multi-GPU/Multi-Node Benefits
 
-The architecture diagram shows 2 frontends, but **frontend replicas ≠ one per node**. Here's how it actually works in production:
+**In this lab (single node, 2 GPUs):**
+- Each GPU runs a separate worker
+- Router can direct requests to the worker with the best KV cache match
+- NIXL can transfer cache data between workers on the same node
 
-**Frontend Scaling Strategy**:
-```
-Small cluster (3 nodes):    2-3 frontend replicas
-Medium cluster (10 nodes):  3-5 frontend replicas
-Large cluster (50+ nodes):  5-10 frontend replicas
-```
-
-**Load Balancing via Kubernetes Service**:
-
-When you create a Service (NodePort or LoadBalancer), Kubernetes automatically load balances across all frontend pods:
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: frontend-service
-spec:
-  type: LoadBalancer  # or NodePort
-  selector:
-    component: frontend  # Selects ALL frontend pods
-  ports:
-  - port: 8000
-```
-
-**How Traffic Flows**:
-1. **External Load Balancer** (cloud provider or Ingress) receives request
-2. **Kubernetes Service** load balances to any frontend pod
-3. **Frontend** sends inference request via NATS
-4. **NATS** routes to an available worker (KV-aware routing if enabled)
-5. **Worker** may receive KV cache data from another worker via NIXL
-6. **Worker** responds via NATS
-7. **Frontend** returns HTTP response
-
-**Key Benefits**:
-- ✅ **High Availability**: If one frontend crashes, others continue
-- ✅ **Load Distribution**: Spread HTTP connections across pods
-- ✅ **Dynamic Discovery**: NATS decouples frontends from workers (Dynamo 0.7.x requires NATS/etcd; 0.8+ supports K8s-native discovery)
-- ✅ **Flexible Scaling**: Add/remove frontends independently
-- ✅ **KV-Aware Routing**: Route requests to workers with relevant cached data
-
-**Single Node (This Lab)**:
-Even in a single-node setup with multiple GPUs/workers, KV-aware routing provides benefits! The Router uses NATS to track which worker has which cached prefixes, directing requests to the worker with the best cache hit potential.
+**In production (multi-node):**
+- Scale workers across multiple nodes
+- Scale frontends for high availability (multiple frontend replicas)
+- NIXL transfers cache data between nodes over the network (RDMA/TCP)
+- Kubernetes Services automatically load balance traffic across frontend replicas
 
 ### When to Use Distributed Dynamo
 
@@ -250,26 +167,13 @@ Even in a single-node setup with multiple GPUs/workers, KV-aware routing provide
 
 ---
 
-## Section 2: Deploy Distributed Dynamo (K8s-Native)
-
-### ⚠️ IMPORTANT: Choose Your Deployment Mode
-
-**For v0.8.0, we recommend K8s-native mode (simpler, no extra infrastructure):**
-- **K8s-Native Path**: Skip Steps 2-4 below and go directly to Section 3
-- **NATS/etcd Path** (100+ nodes only): Continue with Steps 2-4
+## Section 2: Environment Setup
 
 ### Overview
 
-**K8s-Native Mode (Recommended)**:
-- No NATS or etcd installation required
-- Uses Kubernetes EndpointSlices for discovery
-- TCP transport (default)
-- Sufficient for 2-50 node clusters
+This lab uses **K8s-native deployment** - no NATS or etcd installation required. Dynamo uses Kubernetes EndpointSlices for service discovery and TCP for transport.
 
-**NATS/etcd Mode (Optional Advanced)**:
-- Requires Steps 2-4 below
-- For 100+ nodes, multi-region, custom routing
-- See release notes for configuration details
+**For NATS/etcd deployment** (extreme scale only), see Appendix A after completing this lab.
 
 ### Step 1: Set Environment Variables
 
@@ -291,154 +195,6 @@ echo "  Node IP:          $NODE_IP"
 echo ""
 echo "✓ Environment configured for distributed Dynamo setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-```
-
-### Step 2: Install NATS Message Bus
-
-NATS handles distributed coordination metadata between Dynamo components:
-
-```bash
-# Create namespace for NATS
-kubectl create namespace nats-system --dry-run=client -o yaml | kubectl apply -f -
-
-# Add NATS Helm repository
-echo "Adding NATS Helm repository..."
-helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-helm repo update
-
-# Install NATS (with Prometheus exporter)
-echo "Installing NATS with metrics exporter..."
-helm upgrade --install nats nats/nats \
-  --namespace nats-system \
-  --set config.jetstream.enabled=true \
-  --set config.jetstream.fileStore.pvc.size=1Gi \
-  --set promExporter.enabled=true \
-  --set promExporter.port=7777 \
-  --wait \
-  --timeout 5m
-
-echo ""
-echo "✓ NATS installed successfully"
-echo "  Connection: nats://nats.nats-system:4222"
-echo "  Metrics: Port 7777"
-echo ""
-echo "Note: NATS handles metadata (cache events, routing tables)."
-echo "      Actual KV cache data transfers via NIXL (RDMA/TCP)."
-```
-
-### Step 3: Install etcd Coordination Layer
-
-etcd provides distributed coordination for Grove components:
-
-```bash
-# Create namespace for etcd
-kubectl create namespace etcd-system --dry-run=client -o yaml | kubectl apply -f -
-
-# Add Bitnami Helm repository
-echo "Adding Bitnami Helm repository..."
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-
-# Install etcd (using legacy Bitnami mirror)
-echo "Installing etcd..."
-helm upgrade --install etcd bitnami/etcd \
-  --namespace etcd-system \
-  --set replicaCount=1 \
-  --set auth.rbac.create=false \
-  --set image.registry=docker.io \
-  --set image.repository=bitnamilegacy/etcd \
-  --set persistence.size=1Gi \
-  --set preUpgradeHook.enabled=false \
-  --wait \
-  --timeout 5m
-
-echo ""
-echo "✓ etcd installed successfully"
-```
-
-### Step 4: Verify Grove Infrastructure
-
-Check that NATS and etcd are running:
-
-```bash
-# Check NATS pods
-echo "Checking NATS deployment..."
-kubectl get pods -n nats-system
-
-echo ""
-echo "Checking NATS service..."
-kubectl get svc -n nats-system
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# Check etcd pods
-echo "Checking etcd deployment..."
-kubectl get pods -n etcd-system
-
-echo ""
-echo "Checking etcd service..."
-kubectl get svc -n etcd-system
-
-echo ""
-echo "✓ Grove infrastructure verified"
-echo "  NATS:  nats://nats.nats-system:4222 (metadata/coordination)"
-echo "  etcd:  http://etcd.etcd-system:2379 (service discovery)"
-echo "  NIXL will handle KV cache data transfer between workers"
-```
-
-### Step 4: Enable Prometheus Monitoring
-
-Create PodMonitors so Prometheus can scrape NATS and etcd metrics:
-
-```bash
-# Create PodMonitor for NATS (scrapes the prometheus-nats-exporter sidecar)
-echo "Enabling NATS metrics collection..."
-cat <<'EOF' | kubectl apply -f -
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: nats
-  namespace: nats-system
-  labels:
-    release: kube-prometheus-stack
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: nats
-  podMetricsEndpoints:
-  - port: prom-metrics
-    path: /metrics
-EOF
-
-# Create PodMonitor for etcd
-echo "Enabling etcd metrics collection..."
-cat <<'EOF' | kubectl apply -f -
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: etcd
-  namespace: etcd-system
-  labels:
-    release: kube-prometheus-stack
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: etcd
-  podMetricsEndpoints:
-  - port: client
-    path: /metrics
-EOF
-
-echo ""
-echo "✓ Prometheus monitoring enabled for distributed infrastructure"
-echo "  Metrics will be available in Grafana within 2-3 minutes"
-echo ""
-echo "  NATS metrics: Scraped from prometheus-nats-exporter (port: prom-metrics)"
-echo "  etcd metrics: Scraped directly from etcd's /metrics endpoint (port: client)"
-echo ""
-echo "Note: etcd metrics typically appear faster than NATS metrics"
-echo "      NATS metrics show coordination traffic, not KV cache data volume"
 ```
 
 ---
@@ -589,43 +345,17 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
 
 echo ""
 echo "✓ Distributed Dynamo deployment is serving requests"
-echo "  Router uses NATS for worker coordination"
+echo "  Multiple workers coordinated via K8s-native discovery"
 echo "  NIXL handles KV cache data transfer between workers"
-```
-
-### Step 5: Verify NATS and NIXL Integration
-
-```bash
-# Check worker logs for NATS connectivity and NIXL initialization
-echo "Verifying NATS and NIXL integration..."
-NAMESPACE=${NAMESPACE:-dynamo}
-
-WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-
-if [ -n "$WORKER_POD" ]; then
-    echo "Checking worker: $WORKER_POD"
-    kubectl logs -n $NAMESPACE $WORKER_POD 2>&1 | grep -i "nats\|nixl" | head -5
-    
-    echo ""
-    echo "✓ Workers are using:"
-    echo "  • NATS for coordination and cache awareness"
-    echo "  • NIXL for KV cache data transfer (RDMA/TCP/SSD)"
-    echo ""
-    echo "Note: NATS carries metadata (cache events, routing tables)."
-    echo "      NIXL transfers the actual tensor data between workers."
-else
-    echo "⚠️ No worker pods found. Make sure the deployment is running:"
-    kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
-fi
 ```
 
 ---
 
 ## Section 4: Monitoring Distributed Components
 
-### Step 1: Access Grafana Dashboards
+### Step 1: Access Dynamo Metrics in Grafana
 
-The distributed infrastructure dashboards were created during the oneshot.sh bootstrap:
+Monitor your distributed Dynamo deployment using Grafana:
 
 ```bash
 # Get Grafana URL
@@ -633,130 +363,21 @@ BREV_ID=$(hostname | cut -d'-' -f2)
 GRAFANA_URL="https://grafana0-${BREV_ID}.brevlab.com/"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📊 Distributed Dynamo Monitoring Dashboards"
+echo "📊 Distributed Dynamo Monitoring"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Grafana URL: $GRAFANA_URL"
 echo ""
-echo "  Available Dashboards:"
-echo "    • NATS Overview - Message bus metrics (metadata/coordination)"
-echo "    • etcd Overview - Service discovery metrics"
-echo "    • Dynamo Inference Metrics - Model serving metrics"
+echo "  Dashboard: Dynamo Inference Metrics"
+echo "    • Request rates across multiple workers"
+echo "    • Time to First Token (TTFT) distribution"
+echo "    • Inter-Token Latency (ITL) per worker"
+echo "    • Worker utilization and queue depths"
 echo ""
-echo "🔗 Open Grafana and search for these dashboards"
+echo "🔗 Open Grafana and search for 'Dynamo Inference'"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ```
 
-### Step 2: Understanding NATS Metrics
-
-The NATS Overview dashboard shows real-time metrics about the message bus that Dynamo uses for distributed coordination metadata (not KV cache data).
-
-#### Connection Metrics (Top Left Panel)
-
-**`nats_varz_connections`** - Current active connections to NATS
-- **What it shows**: Number of Dynamo components connected to NATS
-- **Expected value**: 
-  - With distributed deployment running: 2-4 connections (workers + frontend)
-  - Without active deployment: 0
-- **Why it matters**: Each Dynamo component (frontend, workers) maintains a connection to NATS for coordination
-
-#### Message Rate Metrics (Top Center Panels)
-
-**`rate(nats_varz_in_msgs[1m])`** - Incoming messages per second
-- **What it shows**: Coordination messages NATS is receiving (cache events, routing metadata)
-- **Expected value**: 
-  - Idle: Low (< 1 msg/s for heartbeats)
-  - During load: 10-100+ msg/s depending on request rate
-- **Why it matters**: Shows the coordination throughput (NOT KV cache data volume)
-- **Important**: NATS messages are small metadata packets, not gigabytes of tensor data
-
-**`rate(nats_varz_out_msgs[1m])`** - Outgoing messages per second
-- **What it shows**: How many coordination messages NATS is distributing
-- **Expected value**: Similar to or slightly higher than incoming rate
-- **Why it matters**: NATS may send multiple copies of messages to subscribers (pub/sub pattern)
-
-#### Resource Metrics (Top Right Panel)
-
-**`nats_varz_cpu`** - NATS CPU usage percentage
-- **What it shows**: CPU usage of the NATS process
-- **Expected value**: 
-  - Idle: < 1%
-  - Under load: 5-20%
-  - High load: > 50% (consider scaling)
-- **Why it matters**: High CPU might indicate NATS is becoming a bottleneck
-
-#### Message Rate Graph (Middle Panel)
-
-**Time series visualization** of message rates
-- **Green line**: Incoming messages (rate(nats_varz_in_msgs[1m]))
-- **Blue line**: Outgoing messages (rate(nats_varz_out_msgs[1m]))
-- **What to look for**:
-  - Spikes during traffic bursts
-  - Correlation between in/out rates
-  - Steady state during constant load
-  - Drops to zero when idle
-
-#### Memory Usage (Bottom Left Panel)
-
-**`nats_varz_mem`** - NATS memory consumption in MB
-- **What it shows**: RAM used by the NATS process
-- **Expected value**: 
-  - Base: 20-50 MB
-  - With JetStream: 50-200 MB
-  - Under load: May increase with buffered messages
-- **Why it matters**: Monitors memory leaks or excessive buffering
-
-#### NATS Statistics (Bottom Right Panel)
-
-**`nats_varz_subscriptions`** - Active subscriptions
-- **What it shows**: Number of topics/subjects that components are subscribed to
-- **Expected value**: 5-20 subscriptions (depending on number of workers and endpoints)
-- **Why it matters**: Each Dynamo service registers subscriptions for the requests it can handle
-
-**`nats_server_total_messages`** - Total messages processed
-- **What it shows**: Cumulative count of all messages since NATS started
-- **Expected value**: Increases steadily under load
-- **Why it matters**: Overall message volume indicator
-
-**`nats_server_total_streams`** - JetStream streams
-- **What it shows**: Number of persistent message streams
-- **Expected value**: Usually 0-2 for Grove (depends on configuration)
-- **Why it matters**: JetStream provides message persistence and replay capabilities
-
-#### Interpreting the Dashboard
-
-**Healthy State**:
-- ✅ Connections: 2-4 (workers + frontend connected)
-- ✅ Message rates: Correlated with request traffic (metadata only)
-- ✅ CPU: < 20%
-- ✅ Memory: Stable, not growing continuously
-- ✅ Subscriptions: Non-zero (services registered)
-
-**Problem Indicators**:
-- ⚠️ Connections: 0 when deployment exists → connectivity issue
-- ⚠️ Message rate: Out > In by large margin → message amplification/looping
-- ⚠️ CPU: Sustained > 80% → NATS bottleneck
-- ⚠️ Memory: Continuously growing → memory leak or message backlog
-- ⚠️ Subscriptions: 0 → services not registering with NATS
-
-**Important Note**: NATS message volume does NOT reflect KV cache data transfer volume. NIXL handles the heavy tensor data transfer (gigabytes) separately via RDMA/TCP.
-
-### Step 3: Understanding etcd Metrics
-
-Key etcd metrics to monitor:
-
-**Health Metrics**:
-- `etcd_server_has_leader` - Whether cluster has a leader (should be 1)
-- `etcd_server_is_leader` - Whether this instance is the leader
-
-**Performance Metrics**:
-- `etcd_mvcc_db_total_size_in_bytes` - Database size
-- `rate(etcd_server_proposals_committed_total[5m])` - Proposal commit rate
-
-**Operation Metrics**:
-- `etcd_debugging_mvcc_put_total` - Total PUT operations
-- `etcd_debugging_mvcc_range_total` - Total GET operations
-
-### Step 4: Test Distributed Dynamo with Traffic
+### Step 2: Test Distributed Dynamo with Traffic
 
 Generate meaningful traffic to see distributed coordination in action:
 
@@ -781,9 +402,9 @@ send_request() {
 # Send 30 requests with 3 concurrent workers
 echo "Sending 30 requests with 3 concurrent connections..."
 echo "This will generate metrics for:"
-echo "  - NATS coordination message throughput"
-echo "  - Worker utilization across 2 workers"
-echo "  - KV-aware request routing"
+echo "  - Request throughput across multiple workers"
+echo "  - Worker utilization and load balancing"
+echo "  - KV cache effectiveness and NIXL transfers"
 echo ""
 
 for i in {1..10}; do
@@ -799,9 +420,9 @@ echo ""
 echo "✓ Sent 30 requests with concurrent load"
 echo ""
 echo "Check metrics in Grafana:"
-echo "  - Dynamo Inference: Request throughput, TTFT, ITL across workers"
-echo "  - NATS Overview: Coordination message rates (metadata only)"
-echo "  - etcd Overview: Service discovery operations"
+echo "  - Dynamo Inference Dashboard"
+echo "  - Request throughput, TTFT, ITL across workers"
+echo "  - Worker queue depths and GPU utilization"
 echo ""
 echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/"
 ```
@@ -816,7 +437,7 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 |--------|------------|-----------|
 | **Setup Complexity** | ✅ Simple (no extra infra) | ⚠️ Complex (2 systems to manage) |
 | **Latency** | ✅ Lower (direct TCP) | ⚠️ Slightly higher (pub/sub) |
-| **Scale Sweet Spot** | 2-50 nodes | 50-1000+ nodes |
+| **Scale Sweet Spot** | Most deployments | Extreme scale |
 | **Discovery** | EndpointSlices (built-in) | etcd (external) |
 | **Transport** | TCP | NATS + TCP |
 | **Ops Burden** | ✅ Low | ⚠️ Medium-High |
@@ -825,7 +446,7 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 | **Cache Coordination** | ✅ Yes (via planner) | ✅ Yes (via NATS) |
 | **NIXL Support** | ✅ Yes | ✅ Yes |
 
-**Recommendation:** Start with K8s-native. Only add NATS/etcd if you hit scale limits (100+ nodes) or need multi-region.
+**Recommendation:** Start with K8s-native. Only add NATS/etcd if you need extreme scale or multi-region capabilities.
 
 ### Single-Node vs Multi-Node
 
@@ -844,8 +465,8 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 ✓ NIXL transfers cache data efficiently (RDMA/TCP between nodes)
 ✓ Improved cache hit rates = lower latency
 ✓ Better resource utilization across cluster
-✓ K8s-native sufficient for 2-50 nodes
-✓ NATS/etcd for 100+ nodes or multi-region
+✓ K8s-native recommended for most deployments
+✓ NATS/etcd for extreme scale or multi-region
 ```
 ✓ Enables advanced features (cache migration, load balancing)
 ✗ Network latency between nodes
@@ -1002,31 +623,6 @@ echo "Test it:"
 echo "  curl http://$NODE_IP:30100/v1/models"
 ```
 
-### Step 3: Remove Distributed Infrastructure (Optional)
-
-Only remove NATS and etcd if you're done experimenting with distributed Dynamo:
-
-```bash
-# Remove NATS
-echo "Removing NATS..."
-helm uninstall nats -n nats-system
-kubectl delete namespace nats-system
-
-# Remove etcd  
-echo "Removing etcd..."
-helm uninstall etcd -n etcd-system
-kubectl delete namespace etcd-system
-
-# Remove PodMonitors
-kubectl delete podmonitor nats -n nats-system 2>/dev/null || true
-kubectl delete podmonitor etcd -n etcd-system 2>/dev/null || true
-
-echo ""
-echo "✓ Distributed infrastructure removed"
-echo ""
-echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this lab"
-```
-
 ---
 
 ## Known Issues (v0.8.0 Distributed Serving)
@@ -1060,20 +656,21 @@ echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this 
 
 ### What You Learned
 
-- ✅ Distributed Dynamo architecture and components (NATS, etcd, NIXL)
+- ✅ Distributed Dynamo architecture with K8s-native discovery
 - ✅ Difference between Grove (operator) and Dynamo (serving framework)
-- ✅ Deploying distributed coordination infrastructure
-- ✅ Creating a distributed Dynamo deployment with KV-aware routing
-- ✅ Monitoring NATS and etcd with Grafana
-- ✅ Understanding NATS (metadata) vs NIXL (KV cache data transfer)
+- ✅ Deploying distributed Dynamo with multiple workers
+- ✅ Creating a distributed deployment with KV-aware routing
+- ✅ Monitoring distributed Dynamo metrics with Grafana
+- ✅ Understanding NIXL for KV cache data transfer between workers
 - ✅ Trade-offs between single-node and multi-node setups
+- ✅ When to consider NATS/etcd for extreme scale (Appendix A & B)
 
 ### Key Takeaways
 
 **Architecture Clarity**:
 - **Grove**: Kubernetes Operator (orchestrates Dynamo deployments)
 - **Dynamo**: Inference serving framework (does the actual work)
-- **NATS**: Handles coordination metadata and cache events (small messages)
+- **K8s-native Discovery**: EndpointSlices for worker discovery (v0.8.0+)
 - **NIXL**: Transfers actual KV cache data (gigabytes via RDMA/TCP/SSD)
 
 **Distributed Dynamo is Powerful**:
@@ -1082,17 +679,18 @@ echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this 
 - Improves cache hit rates and throughput
 - Essential for production scale-out scenarios
 
-**Benefits Even on Single Node with Multiple GPUs**:
-- KV-aware Router directs requests to workers with relevant cache
-- Improved cache hit rates compared to random routing
-- Coordination overhead is minimal with NATS
+**Benefits of K8s-Native (v0.8.0+)**:
+- Simpler deployment (no NATS/etcd required)
+- Lower latency (direct TCP connections)
+- Fewer moving parts to maintain
+- Built-in Kubernetes service discovery
 
 **Production Considerations**:
 - Use distributed Dynamo when scaling beyond single GPU
-- Monitor NATS message rates for coordination health (not data volume)
+- Monitor worker metrics for health and utilization
 - Plan for network latency between nodes in multi-node setups
 - Consider cache hit patterns for your workload
-- Dynamo 0.8+ supports K8s-native discovery (optional NATS/etcd)
+- NATS/etcd optional for extreme scale (see Appendix A)
 
 ### Real-World Applications
 
@@ -1106,85 +704,387 @@ echo "Note: You can reinstall NATS/etcd anytime by re-running Section 2 of this 
 **Deployment Options**:
 - **Single GPU**: No distributed coordination needed
 - **Multiple GPUs, single node**: Distributed Dynamo with KV-aware routing beneficial
-- **Small clusters (2-5 nodes)**: Distributed Dynamo provides clear benefits
-- **Large clusters (10+ nodes)**: Distributed Dynamo essential for coordination
-- **Dynamo 0.8+**: Can use K8s-native discovery for simpler deployments
+- **Small clusters**: K8s-native discovery (simple, effective)
+- **Large clusters**: K8s-native for most; NATS/etcd for extreme scale
 
 ### Next Steps
 
 - **Experiment**: Try different worker replica counts to see KV-aware routing
-- **Monitor**: Watch NATS/etcd dashboards during traffic (coordination metadata)
-- **Compare**: Deploy same model without NATS/etcd and compare metrics
+- **Monitor**: Watch Dynamo metrics dashboards during traffic
 - **Scale**: If you have access to multi-node clusters, test distributed benefits
 - **Learn**: Understand NIXL for KV cache data transfer in Dynamo docs
-- **Explore**: Check out Dynamo 0.8+ features (K8s-native discovery)
+- **Explore**: Review Appendix A & B if you need NATS/etcd for extreme scale
 
 ---
 
 ## Troubleshooting
 
-### NATS Not Starting
+### Deployment Not Starting
 
 ```bash
-# Check NATS pods
-kubectl get pods -n nats-system
-kubectl logs -n nats-system nats-0
-
-# Common issues:
-# - Insufficient resources (need ~256MB RAM)
-# - Port conflicts (4222 already in use)
-# - PersistentVolume issues
-```
-
-### etcd Not Starting
-
-```bash
-# Check etcd pods
-kubectl get pods -n etcd-system
-kubectl logs -n etcd-system etcd-0
-
-# Common issues:
-# - Insufficient resources (need ~512MB RAM)
-# - Volume mounting issues
-# - Network policies blocking ports
-```
-
-### Workers Not Connecting to Distributed Infrastructure
-
-```bash
-# Check worker logs for NATS/NIXL connection messages
+# Check deployment status
 NAMESPACE=${NAMESPACE:-dynamo}
+kubectl describe dynamographdeployment vllm-distributed-demo -n $NAMESPACE
 
-kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker | grep -i "nats\|nixl"
+# Check pod status
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
 
-# Verify NATS/etcd service endpoints are correct
-kubectl get svc -n nats-system
-kubectl get svc -n etcd-system
+# Check worker logs
+kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker
+
+# Common issues:
+# - Insufficient GPU resources
+# - Worker gang scheduling waiting for all pods
+# - Image pull errors
 ```
 
-### No Cache Sharing Observed
+### Workers Not Discovered
 
-**This is normal behavior!** Understanding what's actually happening:
+```bash
+# Check K8s services and endpoints
+NAMESPACE=${NAMESPACE:-dynamo}
+kubectl get svc -n $NAMESPACE
+kubectl get endpoints -n $NAMESPACE
 
-**What NATS Does** (visible in metrics):
-- Shares metadata about cache state between workers
-- Enables KV-aware routing (Router knows which worker has which cache blocks)
-- Low message volume (small coordination packets)
+# Check EndpointSlices (K8s-native discovery)
+kubectl get endpointslices -n $NAMESPACE
 
-**What NIXL Does** (not visible in NATS metrics):
+# Check worker pods are running
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker
+
+# Common issues:
+# - Workers not fully ready (check 1/1 Running)
+# - Service selectors not matching pods
+# - Network policies blocking communication
+```
+
+### No Requests Reaching Workers
+
+```bash
+# Test frontend endpoint
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+curl -v http://$NODE_IP:30200/v1/models
+
+# Check frontend logs
+kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend
+
+# Verify NodePort service exists
+kubectl get svc vllm-distributed-demo-frontend-np -n $NAMESPACE
+
+# Common issues:
+# - NodePort service not created
+# - Frontend pod not ready
+# - Port conflicts on node
+```
+
+### Understanding Cache Sharing with NIXL
+
+**NIXL** (NVIDIA Inference Transfer Library) handles KV cache transfer between workers:
+
 - Transfers actual KV cache data (gigabytes of tensors)
-- Uses RDMA, TCP, or CPU/SSD offload
+- Uses RDMA, TCP, or CPU/SSD offload  
 - Direct worker-to-worker communication
+- Not visible in application logs (happens at library level)
 
 **On Single Node**:
-- Workers can still benefit from KV-aware routing
-- Cache transfers via NIXL are faster (no network)
-- NATS provides coordination, not data transfer
+- Cache transfers via NIXL are faster (local)
+- Workers coordinate via K8s-native discovery
+- Benefits still apply with multiple GPU workers
 
 **Benefits Require**:
 - Multiple workers (even on same node)
 - Repeated queries with shared prefixes
 - Workload that generates cache hits
+
+**For NATS/etcd troubleshooting**, see Appendix B
+
+---
+
+## Appendix A: NATS/etcd Architecture (Optional - Extreme Scale)
+
+This appendix covers the NATS/etcd deployment architecture for extreme scale deployments or multi-region setups. **Most users should use K8s-native deployment** (covered in the main lab).
+
+### When You Need NATS/etcd
+
+Consider NATS/etcd if you have:
+- Very large Kubernetes clusters (extreme scale)
+- Multi-region deployments
+- Complex custom routing logic
+- Advanced cache policies and coordination requirements
+
+### NATS/etcd Architecture Diagram
+
+```
+               ┌────────────────────────────┐
+               │  Cloud Load Balancer       │
+               │  or Ingress Controller     │
+               └──────────┬─────────────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    │Frontend 1│    │Frontend 2│    │Frontend 3│
+    │ (Node 1) │    │ (Node 2) │    │ (Node 3) │
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         │                │                │
+         └────────────────┼────────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  NATS Message Bus     │
+              │  (Metadata, Routing,  │
+              │   Cache Awareness)    │
+              └───────────┬───────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  etcd (Coordination)  │
+              │  (Service Discovery)  │
+              └───────────┬───────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
+    │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
+    │  +GPU    │    │  +GPU    │    │  +GPU    │
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         │                │                │
+         └────────────────┼────────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  NIXL (KV Cache       │
+              │   Data Transfer)      │
+              │  RDMA/TCP/SSD         │
+              └───────────────────────┘
+```
+
+### Components
+
+**NATS Message Bus:**
+- Pub/sub messaging for metadata (cache events, routing tables)
+- Low-latency coordination between frontends and workers
+- Does NOT transfer KV cache data (NIXL handles that)
+
+**etcd:**
+- Distributed configuration and service discovery
+- Leader election and coordination
+- Cluster state management
+
+**NIXL:**
+- Handles actual KV cache data transfer (same as K8s-native mode)
+- Uses RDMA/TCP for high-speed transfer
+- Direct worker-to-worker communication
+
+### Deployment Steps (Optional)
+
+If you need to deploy NATS/etcd, refer to Section 2a in the main lab (marked as "Optional - Skip for K8s-Native"). The steps are preserved but skipped in the standard lab flow.
+
+### Trade-offs vs K8s-Native
+
+| Aspect | K8s-Native | NATS/etcd |
+|--------|------------|-----------|
+| Setup Complexity | Simple | Complex |
+| Ops Burden | Low | Medium-High |
+| Max Scale | Standard clusters | Extreme scale |
+| Multi-Region | Limited | Excellent |
+| Custom Routing | Basic | Advanced |
+
+---
+
+## Appendix B: NATS/etcd Deployment Steps (Optional)
+
+**⚠️ WARNING:** These steps are ONLY for users deploying NATS/etcd for extreme-scale scenarios. Most users should skip this appendix and use K8s-native deployment (covered in the main lab).
+
+### When to Use These Steps
+
+Deploy NATS/etcd only if you have:
+- Very large Kubernetes clusters (extreme scale)
+- Multi-region deployments
+- Complex custom routing requirements
+- Advanced cache coordination policies
+
+### Prerequisites
+
+- Complete Section 2 Step 1 (Environment Setup)
+- Have cluster-admin access for cluster-wide resources
+
+### Step 1: Install NATS Message Bus
+
+NATS handles distributed coordination metadata between Dynamo components:
+
+```bash
+# Create namespace for NATS
+kubectl create namespace nats-system --dry-run=client -o yaml | kubectl apply -f -
+
+# Add NATS Helm repository
+echo "Adding NATS Helm repository..."
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+helm repo update
+
+# Install NATS (with Prometheus exporter)
+echo "Installing NATS with metrics exporter..."
+helm upgrade --install nats nats/nats \
+  --namespace nats-system \
+  --set config.jetstream.enabled=true \
+  --set config.jetstream.fileStore.pvc.size=1Gi \
+  --set promExporter.enabled=true \
+  --set promExporter.port=7777 \
+  --wait \
+  --timeout 5m
+
+echo ""
+echo "✓ NATS installed successfully"
+echo "  Connection: nats://nats.nats-system:4222"
+echo "  Metrics: Port 7777"
+echo ""
+echo "Note: NATS handles metadata (cache events, routing tables)."
+echo "      Actual KV cache data transfers via NIXL (RDMA/TCP)."
+```
+
+### Step 2: Install etcd Coordination Layer
+
+etcd provides distributed coordination for Grove components:
+
+```bash
+# Create namespace for etcd
+kubectl create namespace etcd-system --dry-run=client -o yaml | kubectl apply -f -
+
+# Add Bitnami Helm repository
+echo "Adding Bitnami Helm repository..."
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+# Install etcd (using legacy Bitnami mirror)
+echo "Installing etcd..."
+helm upgrade --install etcd bitnami/etcd \
+  --namespace etcd-system \
+  --set replicaCount=1 \
+  --set auth.rbac.create=false \
+  --set image.registry=docker.io \
+  --set image.repository=bitnamilegacy/etcd \
+  --set persistence.size=1Gi \
+  --set preUpgradeHook.enabled=false \
+  --wait \
+  --timeout 5m
+
+echo ""
+echo "✓ etcd installed successfully"
+```
+
+### Step 3: Verify Infrastructure
+
+Check that NATS and etcd are running:
+
+```bash
+# Check NATS pods
+echo "Checking NATS deployment..."
+kubectl get pods -n nats-system
+
+echo ""
+echo "Checking NATS service..."
+kubectl get svc -n nats-system
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Check etcd pods
+echo "Checking etcd deployment..."
+kubectl get pods -n etcd-system
+
+echo ""
+echo "Checking etcd service..."
+kubectl get svc -n etcd-system
+
+echo ""
+echo "✓ Infrastructure verified"
+echo "  NATS:  nats://nats.nats-system:4222 (metadata/coordination)"
+echo "  etcd:  http://etcd.etcd-system:2379 (service discovery)"
+echo "  NIXL will handle KV cache data transfer between workers"
+```
+
+### Step 4: Enable Prometheus Monitoring (Optional)
+
+Create PodMonitors so Prometheus can scrape NATS and etcd metrics:
+
+```bash
+# Create PodMonitor for NATS
+echo "Enabling NATS metrics collection..."
+cat <<'EOF' | kubectl apply -f -
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: nats
+  namespace: nats-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  podMetricsEndpoints:
+  - port: prom-metrics
+    path: /metrics
+EOF
+
+# Create PodMonitor for etcd
+echo "Enabling etcd metrics collection..."
+cat <<'EOF' | kubectl apply -f -
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: etcd
+  namespace: etcd-system
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: etcd
+  podMetricsEndpoints:
+  - port: client
+    path: /metrics
+EOF
+
+echo ""
+echo "✓ Prometheus monitoring enabled"
+echo "  Metrics will be available in Grafana within 2-3 minutes"
+```
+
+### Cleanup (NATS/etcd)
+
+When you're done with NATS/etcd:
+
+```bash
+# Remove NATS
+echo "Removing NATS..."
+helm uninstall nats -n nats-system
+kubectl delete namespace nats-system
+
+# Remove etcd  
+echo "Removing etcd..."
+helm uninstall etcd -n etcd-system
+kubectl delete namespace etcd-system
+
+# Remove PodMonitors
+kubectl delete podmonitor nats -n nats-system 2>/dev/null || true
+kubectl delete podmonitor etcd -n etcd-system 2>/dev/null || true
+
+echo ""
+echo "✓ Infrastructure removed"
+```
+
+### Configuring Dynamo to Use NATS/etcd
+
+After installing NATS/etcd, you need to configure your `DynamoGraphDeployment` to use them. Add these annotations to your deployment spec:
+
+```yaml
+metadata:
+  annotations:
+    dynamo.nvidia.com/discovery-backend: "nats"  # Use NATS/etcd instead of K8s-native
+    dynamo.nvidia.com/nats-url: "nats://nats.nats-system:4222"
+    dynamo.nvidia.com/etcd-url: "http://etcd.etcd-system:2379"
+```
+
+Refer to Dynamo documentation for complete configuration options.
 
 ---
 
