@@ -221,6 +221,8 @@ Let's verify metrics are accessible:
 
 
 ```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
 # Get the frontend pod name
 FRONTEND_POD=$(kubectl get pods -n $NAMESPACE | grep frontend | head -1 | awk '{print $1}')
 
