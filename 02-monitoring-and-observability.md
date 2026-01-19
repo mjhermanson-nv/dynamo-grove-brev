@@ -289,6 +289,9 @@ The Dynamo Inference dashboard provides visibility into:
 Deploy the dashboard as a ConfigMap that Grafana will automatically load:
 
 ```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+export GRAFANA_URL=${GRAFANA_URL:-"http://$(hostname -I | awk '{print $1}'):30080"}
+
 # Create ConfigMap with dashboard JSON
 echo "Deploying Dynamo Inference Dashboard to $NAMESPACE..."
 
@@ -305,7 +308,7 @@ data:
 EOF
 
 # Add dashboard JSON with proper indentation
-sed 's/^/    /' ~/dynamo-brev/resources/dynamo-inference-dashboard.json >> /tmp/dynamo-inference-dashboard-configmap.yaml
+sed 's/^/    /' resources/dynamo-inference-dashboard.json >> /tmp/dynamo-inference-dashboard-configmap.yaml
 
 # Apply ConfigMap
 kubectl apply -f /tmp/dynamo-inference-dashboard-configmap.yaml
