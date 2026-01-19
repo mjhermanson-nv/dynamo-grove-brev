@@ -262,6 +262,9 @@ We're using the **recommended cluster-wide deployment** (default). According to 
 
 
 ```bash
+# Set default RELEASE_VERSION if not already set
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
+
 # Check if CRDs already exist, install if not
 if kubectl get crd dynamographdeployments.nvidia.com &>/dev/null && \
    kubectl get crd dynamocomponentdeployments.nvidia.com &>/dev/null; then
@@ -286,8 +289,14 @@ fi
 
 
 ```bash
-RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
-NAMESPACE=${NAMESPACE:-dynamo}
+# Set defaults if not already set
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
+export NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "Using configuration:"
+echo "  RELEASE_VERSION: $RELEASE_VERSION"
+echo "  NAMESPACE: $NAMESPACE"
+echo ""
 
 # Download platform chart
 echo "Downloading Dynamo platform chart v$RELEASE_VERSION..."
