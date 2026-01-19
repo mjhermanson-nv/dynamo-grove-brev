@@ -1035,7 +1035,7 @@ kubectl cluster-info
 
 # Set your configuration
 export NAMESPACE="dynamo"
-export RELEASE_VERSION="0.7.1"     # Dynamo version
+export RELEASE_VERSION="0.8.0"     # Dynamo version
 export HF_TOKEN="your_hf_token"    # Your HuggingFace token
 export CACHE_PATH="/data/huggingface-cache"  # Shared cache path
 

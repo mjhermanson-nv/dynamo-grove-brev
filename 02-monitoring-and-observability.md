@@ -64,7 +64,7 @@ Set up the environment variables (same as Lab 1):
 
 ```bash
 # Set environment variables (use defaults if not already set)
-export RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 export NAMESPACE=${NAMESPACE:-dynamo}
 export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
 
