@@ -216,6 +216,11 @@ Dynamo (orchestrated by Grove) uses Kubernetes-native service discovery to coord
 
 We'll create a deployment with 2 workers to demonstrate distributed architecture and KV-aware routing:
 
+**Configuration Notes:**
+- **Data Parallelism**: `replicas: 2` with `tensor-parallel-size: 1` creates 2 independent workers that share KV cache via NIXL
+- **Not Tensor Parallelism**: Each worker loads the full model on 1 GPU (not splitting 1 model across 2 GPUs)
+- **K8s-Native Discovery**: Workers register via Kubernetes EndpointSlices (v0.8.0+)
+
 ```bash
 # Create distributed Dynamo deployment
 echo "Creating distributed Dynamo deployment with 2 workers..."
@@ -234,7 +239,7 @@ spec:
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
     VllmWorker:
       envFromSecret: hf-token-secret
       dynamoNamespace: vllm-distributed-demo
@@ -253,7 +258,7 @@ spec:
             path: /data/huggingface-cache
             type: DirectoryOrCreate
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.7.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
           securityContext:
             capabilities:
               add:
@@ -272,7 +277,7 @@ EOF
 echo ""
 echo "✓ Distributed Dynamo deployment created"
 echo "  Deployment: vllm-distributed-demo"
-echo "  Workers: 2 (will use NATS for coordination and NIXL for cache transfer)"
+echo "  Workers: 2 (data parallelism with KV cache sharing via NIXL)"
 ```
 
 ### Step 2: Create NodePort Service
@@ -1090,18 +1095,25 @@ Refer to Dynamo documentation for complete configuration options.
 
 ## Additional Resources
 
-- **Dynamo Deployment Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/
-- **Grove Operator Guide**: https://docs.nvidia.com/dynamo/latest/guides/dynamo_deploy/grove.html
-- **Grove GitHub Repository**: https://github.com/NVIDIA/grove
-- **NIXL Documentation**: NVIDIA Inference Transfer Library (check Dynamo docs)
+### Core Documentation
+
+- **NVIDIA Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
+- **Dynamo Deployment Guide**: https://docs.nvidia.com/dynamo/latest/kubernetes/deployment/
+- **Grove Operator Guide**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove.html
+- **Dynamo v0.8.0 Release Notes**: https://github.com/ai-dynamo/dynamo/releases/tag/v0.8.0
+
+### Advanced Topics (NATS/etcd - Optional)
+
 - **NATS Documentation**: https://docs.nats.io/
 - **etcd Documentation**: https://etcd.io/docs/
-- **NVIDIA Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
-- **Distributed Systems Patterns**: Understanding consensus and coordination
-- **KV Cache Architecture**: Understanding distributed cache strategies
+
+### Community Resources
+
+- **Dynamo GitHub**: https://github.com/ai-dynamo/dynamo
+- **NVIDIA Developer Forums**: https://forums.developer.nvidia.com/
 
 ---
 
 **Congratulations! You've completed Lab 3: Distributed Dynamo with Grove Orchestration** 🌲
 
-You now understand the fundamentals of distributed LLM serving, the difference between Grove (operator) and Dynamo (serving framework), and how NATS (metadata) and NIXL (data transfer) work together for distributed coordination!
+You now understand the fundamentals of distributed LLM serving, the difference between Grove (operator) and Dynamo (serving framework), and how K8s-native discovery enables distributed coordination!
