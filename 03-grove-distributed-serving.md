@@ -12,22 +12,28 @@ jupyter:
       jupytext_version: 1.18.1
 ---
 
-# Lab 3: Distributed Dynamo with Grove Orchestration
+# Lab 3: Distributed Dynamo with Multi-GPU/Multi-Node Serving
 
 ## Overview
 
 In this lab, you will:
-- Understand Dynamo's distributed serving architecture with Grove orchestration
-- Deploy NATS and etcd for distributed coordination and KV-aware routing
+- **Primary Path:** Deploy distributed Dynamo using K8s-native discovery (simplified, v0.8.0)
+- Understand multi-GPU and multi-node serving architectures
 - Enable distributed KV cache awareness and transfer via NIXL
 - Monitor distributed components with Grafana
-- Understand when and why to use distributed Dynamo in production
+- **Optional Advanced:** Deploy with NATS/etcd for extreme scale (multi-region, 100+ nodes)
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
+**What's New in v0.8.0:**
+- ✅ K8s-native discovery (EndpointSlices) - no etcd needed
+- ✅ TCP transport - no NATS needed
+- ✅ Simpler deployment for 2-50 node clusters
+- ✅ NATS/etcd now optional for extreme scale only
+
 **Note**: Distributed Dynamo is designed for multi-node Kubernetes clusters or single nodes with multiple GPUs. While we'll deploy it on a single node for learning purposes, maximum benefits are realized when scaling across multiple nodes with high cache hit workloads.
 
-## Duration: ~45 minutes
+## Duration: ~45 minutes (K8s-native path) / ~75 minutes (with optional NATS/etcd)
 
 ---
 
@@ -43,10 +49,62 @@ In this lab, you will:
 - **Multi-node deployments** across Kubernetes clusters or multi-GPU single nodes
 - **KV-aware routing** where the Router knows which worker has which cache blocks
 - **Distributed KV cache transfer** between workers via NIXL (NVIDIA Inference Transfer Library)
-- **Coordination and discovery** using NATS for metadata and etcd for service registration
-- **Advanced features** like cache migration and load balancing
+- **Coordination and discovery** using either:
+  - **K8s-native (v0.8.0+)**: EndpointSlices + TCP (simpler, recommended for most use cases)
+  - **NATS/etcd (optional)**: For extreme scale (100+ nodes, multi-region, complex topologies)
 
-### Architecture Components
+### Architecture: K8s-Native (Recommended for Most Users)
+
+```
+               ┌────────────────────────────┐
+               │  Cloud Load Balancer       │
+               │  or Ingress Controller     │
+               └──────────┬─────────────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    │Frontend 1│    │Frontend 2│    │Frontend 3│
+    │ (Node 1) │    │ (Node 2) │    │ (Node 3) │
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         │                │                │
+         └────────────────┼────────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │ Kubernetes            │
+              │  - EndpointSlices     │
+              │    (Discovery)        │
+              │  - TCP (Transport)    │
+              └───────────┬───────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         │                │                │
+    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
+    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
+    │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
+    │  +GPU    │    │  +GPU    │    │  +GPU    │
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         │                │                │
+         └────────────────┼────────────────┘
+                          │
+              ┌───────────▼───────────┐
+              │  NIXL (KV Cache       │
+              │   Data Transfer)      │
+              │  RDMA/TCP/SSD         │
+              └───────────────────────┘
+
+Benefits:
+- Simpler: No additional infrastructure (NATS/etcd)
+- Lower latency: Direct TCP connections
+- Easier ops: Fewer moving parts
+- Sufficient for 2-50 node clusters
+
+Note: Workers typically run on GPU nodes (4-6), separate from
+      CPU-only frontend nodes (1-3). In smaller clusters, they
+      may share nodes with frontends.
+```
+
+### Architecture: NATS/etcd (Optional - For Extreme Scale)
 
 ```
                ┌────────────────────────────┐
@@ -90,31 +148,43 @@ In this lab, you will:
               │  RDMA/TCP/SSD         │
               └───────────────────────┘
 
-Note: Workers typically run on GPU nodes (4-6), separate from
-      CPU-only frontend nodes (1-3). In smaller clusters, they
-      may share nodes with frontends.
+When to use NATS/etcd:
+- 100+ node clusters
+- Multi-region deployments
+- Complex custom routing logic
+- Advanced cache policies
 ```
 
 ### Key Concepts
 
-**NATS**: A high-performance message bus that enables:
-- Metadata sharing (cache events, routing tables)
-- Low-latency pub/sub messaging for coordination
-- Resilient delivery guarantees
-- **Note**: NATS does NOT transfer the actual KV cache data (which is gigabytes of tensors)
+**Kubernetes-native Discovery (v0.8.0+)**: Built-in service discovery:
+- Uses EndpointSlices (standard Kubernetes API)
+- Workers register with K8s API server automatically
+- Frontends watch EndpointSlices for worker availability
+- No additional infrastructure required
 
-**etcd**: A distributed key-value store that provides:
-- Service discovery and registration
-- Configuration management
-- Leader election and coordination
+**TCP Transport (v0.8.0+ default)**: Direct worker communication:
+- Frontends connect to workers via TCP
+- Lower latency than pub/sub patterns
+- Simpler debugging with standard networking tools
 
 **NIXL (NVIDIA Inference Transfer Library)**: Handles actual KV cache data transfer:
 - Uses high-speed transports (RDMA, TCP, or CPU/SSD offload)
 - Transfers gigabytes of tensor data between workers
-- Direct worker-to-worker communication (not through NATS)
+- Direct worker-to-worker communication
+- Works with both K8s-native and NATS/etcd modes
 
 **KV-Aware Routing**: The Router knows which worker has which cache blocks:
-- NATS shares metadata about cache state
+- In K8s-native mode: Routing metadata shared via API or direct communication
+- In NATS mode: NATS shares metadata about cache state
+- Enables intelligent request routing to workers with relevant cached data
+- Dramatically reduces prefill latency when cache hits occur
+
+**Optional NATS/etcd (for extreme scale)**: Advanced coordination:
+- **NATS**: Pub/sub messaging for metadata (cache events, routing tables)
+- **etcd**: Distributed configuration and service discovery
+- **When to use**: 100+ nodes, multi-region, custom routing policies
+- **Note**: NATS does NOT transfer KV cache data (NIXL does that)
 - Router directs requests to workers with relevant cached prefixes
 - Improves cache hit rates even on single node with multiple GPUs
 - Workers transfer actual cache data via NIXL when needed
@@ -180,13 +250,32 @@ Even in a single-node setup with multiple GPUs/workers, KV-aware routing provide
 
 ---
 
-## Section 2: Deploy Distributed Infrastructure
+## Section 2: Deploy Distributed Dynamo (K8s-Native)
+
+### ⚠️ IMPORTANT: Choose Your Deployment Mode
+
+**For v0.8.0, we recommend K8s-native mode (simpler, no extra infrastructure):**
+- **K8s-Native Path**: Skip Steps 2-4 below and go directly to Section 3
+- **NATS/etcd Path** (100+ nodes only): Continue with Steps 2-4
+
+### Overview
+
+**K8s-Native Mode (Recommended)**:
+- No NATS or etcd installation required
+- Uses Kubernetes EndpointSlices for discovery
+- TCP transport (default)
+- Sufficient for 2-50 node clusters
+
+**NATS/etcd Mode (Optional Advanced)**:
+- Requires Steps 2-4 below
+- For 100+ nodes, multi-region, custom routing
+- See release notes for configuration details
 
 ### Step 1: Set Environment Variables
 
 ```bash
 # Set environment variables (use defaults if not already set)
-export RELEASE_VERSION=${RELEASE_VERSION:-0.7.1}
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
 export NAMESPACE=${NAMESPACE:-dynamo}
 export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
 
@@ -721,6 +810,23 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 
 ## Section 5: Understanding Distributed Dynamo Trade-offs
 
+### K8s-Native vs NATS/etcd Comparison (v0.8.0+)
+
+| Aspect | K8s-Native | NATS/etcd |
+|--------|------------|-----------|
+| **Setup Complexity** | ✅ Simple (no extra infra) | ⚠️ Complex (2 systems to manage) |
+| **Latency** | ✅ Lower (direct TCP) | ⚠️ Slightly higher (pub/sub) |
+| **Scale Sweet Spot** | 2-50 nodes | 50-1000+ nodes |
+| **Discovery** | EndpointSlices (built-in) | etcd (external) |
+| **Transport** | TCP | NATS + TCP |
+| **Ops Burden** | ✅ Low | ⚠️ Medium-High |
+| **Multi-Region** | ⚠️ Limited | ✅ Excellent |
+| **Custom Routing** | ⚠️ Basic | ✅ Advanced |
+| **Cache Coordination** | ✅ Yes (via planner) | ✅ Yes (via NATS) |
+| **NIXL Support** | ✅ Yes | ✅ Yes |
+
+**Recommendation:** Start with K8s-native. Only add NATS/etcd if you hit scale limits (100+ nodes) or need multi-region.
+
 ### Single-Node vs Multi-Node
 
 **Single Node with Multiple GPUs (Typical Dev Setup)**:
@@ -728,8 +834,8 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 ✓ KV-aware routing still beneficial (routes to worker with cached data)
 ✓ Learning opportunity to understand architecture
 ✓ Workers can share cache blocks via NIXL locally
+✓ K8s-native = simpler (no NATS/etcd overhead)
 ✗ Less dramatic network benefits (same machine)
-✗ Additional resource overhead (NATS + etcd)
 ```
 
 **Multi-Node (Production)**:
@@ -738,6 +844,9 @@ echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/
 ✓ NIXL transfers cache data efficiently (RDMA/TCP between nodes)
 ✓ Improved cache hit rates = lower latency
 ✓ Better resource utilization across cluster
+✓ K8s-native sufficient for 2-50 nodes
+✓ NATS/etcd for 100+ nodes or multi-region
+```
 ✓ Enables advanced features (cache migration, load balancing)
 ✗ Network latency between nodes
 ✗ Increased complexity in debugging
