@@ -138,7 +138,7 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 - **Dynamo Documentation**: https://docs.nvidia.com/dynamo/latest/
 - **Dynamo GitHub**: https://github.com/ai-dynamo/dynamo
 - **NGC Catalog**: https://catalog.ngc.nvidia.com/
-- **AI-Perf**: https://github.com/triton-inference-server/perf_analyzer
+- **AI-Perf**: https://github.com/ai-dynamo/aiperf
 
 ## 💡 Tips
 
