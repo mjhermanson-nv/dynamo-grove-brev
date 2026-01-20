@@ -663,95 +663,21 @@ echo "  curl http://$NODE_IP:30100/v1/models"
 
 ---
 
-## Known Issues (v0.8.0 Distributed Serving)
-
-**⚠️ Distributed Deployment Issues:**
-
-1. **K8s-native Discovery Propagation**: EndpointSlices may take 5-15 seconds to propagate in large clusters (20+ nodes). First requests may fail with "no available workers" until discovery completes.
-
-2. **NIXL KV Cache Transfer on ARM**: RDMA support on ARM-based nodes (Graviton, Ampere) is experimental in v0.8.0. Fall back to TCP transport if encountering issues.
-
-3. **Multi-Frontend KV-Aware Routing**: In some edge cases with >10 frontend replicas, routing metadata may be stale for 1-2 seconds, resulting in suboptimal cache hits (not failures, just less efficient).
-
-4. **NATS/etcd Compatibility**: If mixing K8s-native and NATS/etcd modes in the same cluster, ensure workers use consistent discovery method. Mixed modes are not supported.
-
-5. **Worker Gang Scheduling**: In v0.8.0, workers must all be ready before accepting traffic. If one worker pod fails, the entire deployment may be blocked. Use `kubectl describe dynamographdeployment` to debug.
-
-**Workarounds:**
-- Discovery delays: Add `--wait-for-workers-timeout=30s` flag to frontend
-- NIXL issues: Set `NIXL_TRANSPORT=tcp` env var to force TCP mode
-- Routing staleness: Reduce frontend replicas to 3-5 for optimal cache awareness
-- Gang scheduling: Use pod disruption budgets and ensure adequate node resources
-
-**Migration from v0.7.x:**
-- K8s-native discovery is backward compatible
-- Existing NATS/etcd deployments continue to work
-- Can upgrade in-place, but test K8s-native in staging first
-
----
-
 ## Summary
 
-### What You Learned
+You've deployed a distributed Dynamo architecture where multiple workers collaborate to serve requests. Unlike Lab 1's disaggregated approach (specialized prefill/decode workers), this distributed model uses identical workers that share cached computations over the network via NIXL.
 
-- ✅ Distributed Dynamo architecture with K8s-native discovery
-- ✅ Difference between Grove (operator) and Dynamo (serving framework)
-- ✅ Deploying distributed Dynamo with multiple workers
-- ✅ Creating a distributed deployment with KV-aware routing
-- ✅ Monitoring distributed Dynamo metrics with Grafana
-- ✅ Understanding NIXL for KV cache data transfer between workers
-- ✅ Trade-offs between single-node and multi-node setups
-- ✅ When to consider NATS/etcd for extreme scale (Appendix A & B)
+**What makes this powerful:**
+- Workers discover each other automatically through Kubernetes
+- KV cache sharing speeds up similar or follow-up requests
+- Scales horizontally—add more workers for more traffic
+- Works on single nodes with multiple GPUs or across multi-node clusters
 
-### Key Takeaways
+**Key architectural choice:**
+- Use **disaggregated serving** (Lab 1) for predictable latency on individual requests
+- Use **distributed serving** (Lab 3) when you have high traffic with cache-friendly patterns
 
-**Architecture Clarity**:
-- **Grove**: Kubernetes Operator (orchestrates Dynamo deployments)
-- **Dynamo**: Inference serving framework (does the actual work)
-- **K8s-native Discovery**: EndpointSlices for worker discovery (v0.8.0+)
-- **NIXL**: Transfers actual KV cache data (gigabytes via RDMA/TCP/SSD)
-
-**Distributed Dynamo is Powerful**:
-- Enables KV-aware routing (even on single node with multiple GPUs)
-- NIXL transfers cache data efficiently between workers
-- Improves cache hit rates and throughput
-- Essential for production scale-out scenarios
-
-**Benefits of K8s-Native (v0.8.0+)**:
-- Simpler deployment (no NATS/etcd required)
-- Lower latency (direct TCP connections)
-- Fewer moving parts to maintain
-- Built-in Kubernetes service discovery
-
-**Production Considerations**:
-- Use distributed Dynamo when scaling beyond single GPU
-- Monitor worker metrics for health and utilization
-- Plan for network latency between nodes in multi-node setups
-- Consider cache hit patterns for your workload
-- NATS/etcd optional for extreme scale (see Appendix A)
-
-### Real-World Applications
-
-**When Companies Use Distributed Dynamo**:
-- Multi-region LLM deployments
-- High-traffic serving (1000+ RPS)
-- Multi-GPU and multi-node clusters
-- Cost optimization (share expensive cache computation)
-- Enterprise multi-tenant platforms
-
-**Deployment Options**:
-- **Single GPU**: No distributed coordination needed
-- **Multiple GPUs, single node**: Distributed Dynamo with KV-aware routing beneficial
-- **Small clusters**: K8s-native discovery (simple, effective)
-- **Large clusters**: K8s-native for most; NATS/etcd for extreme scale
-
-### Next Steps
-
-- **Experiment**: Try different worker replica counts to see KV-aware routing
-- **Monitor**: Watch Dynamo metrics dashboards during traffic
-- **Scale**: If you have access to multi-node clusters, test distributed benefits
-- **Learn**: Understand NIXL for KV cache data transfer in Dynamo docs
-- **Explore**: Review Appendix A & B if you need NATS/etcd for extreme scale
+**Next steps:** Experiment with different worker counts, monitor cache hit rates in Grafana, or explore the optional NATS/etcd setup in Appendix B for extreme-scale deployments.
 
 ---
 
