@@ -199,6 +199,73 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 ---
 
+## Pre-Deployment: Check GPU Availability
+
+**⚠️ CRITICAL**: Lab 3 requires GPUs for distributed workers. Before proceeding, verify you have sufficient GPU resources available.
+
+### Step 1: Check Current GPU Usage
+
+```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "=== Checking GPU Availability ==="
+echo ""
+echo "Total GPUs on this node:"
+kubectl get nodes -o custom-columns=NAME:.metadata.name,GPUs:.status.capacity.nvidia\\.com/gpu
+
+echo ""
+echo "Currently allocated GPUs:"
+kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits."nvidia.com/gpu" != null) | "\(.metadata.namespace)/\(.metadata.name): \(.spec.containers[].resources.limits."nvidia.com/gpu") GPU(s)"'
+
+echo ""
+echo "GPU requests by namespace:"
+kubectl get pods -A -o json | jq -r '.items | group_by(.metadata.namespace) | .[] | "\(.[0].metadata.namespace): \([.[] | .spec.containers[].resources.limits."nvidia.com/gpu" // "0"] | add) GPU(s)"' | grep -v ": 0 GPU"
+```
+
+### Step 2: Clean Up Lab 1 Deployment (If Still Running)
+
+**⚠️ WARNING**: If Lab 1 deployment is still running, you MUST delete it first to free GPUs for Lab 3.
+
+Lab 3 deployment requires:
+- **2 GPUs** for 2 distributed workers (1 GPU each)
+
+If you have only 2 GPUs total and Lab 1 is using them, run this cleanup:
+
+```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
+echo "Checking for Lab 1 deployment..."
+if kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE &>/dev/null; then
+    echo ""
+    echo "⚠️  Lab 1 deployment (vllm-disagg-router) is still running!"
+    echo "   This deployment is using GPUs needed for Lab 3."
+    echo ""
+    echo "Delete Lab 1 deployment? (you can redeploy it later)"
+    echo ""
+    echo "Run: kubectl delete dynamographdeployment vllm-disagg-router -n $NAMESPACE"
+    echo "     kubectl delete svc vllm-frontend-nodeport -n $NAMESPACE"
+    echo ""
+    echo "Or press Ctrl+C to keep Lab 1 running (Lab 3 will fail if insufficient GPUs)"
+else
+    echo "✓ Lab 1 deployment not found - GPUs should be available"
+fi
+```
+
+### Step 3: Verify GPUs Are Available
+
+After cleaning up Lab 1 (if needed), verify GPUs are free:
+
+```bash
+echo "=== Final GPU Check ==="
+kubectl get nodes -o custom-columns=NAME:.metadata.name,TOTAL:.status.capacity.nvidia\\.com/gpu,ALLOCATABLE:.status.allocatable.nvidia\\.com/gpu
+
+echo ""
+echo "If ALLOCATABLE shows 2 GPUs, you're ready for Lab 3!"
+echo "If ALLOCATABLE shows 0, pods are still terminating - wait 30 seconds and re-run."
+```
+
+---
+
 ## Section 3: Deploy Distributed Dynamo Model
 
 ### Understanding Dynamo's Distributed Architecture
