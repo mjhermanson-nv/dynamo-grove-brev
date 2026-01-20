@@ -16,24 +16,24 @@ jupyter:
 
 ## Overview
 
-In this lab, you will:
-- Deploy distributed Dynamo across multiple GPUs or nodes
-- Understand multi-GPU and multi-node serving architectures
-- Enable distributed KV cache awareness and transfer via NIXL
-- Monitor distributed components with Grafana
-- Learn when to add optional infrastructure (NATS/etcd) for large-scale deployments
+In this lab, you'll deploy a **distributed serving** model that works differently from Lab 1. Instead of dedicating specific workers to prefill or decode tasks, you'll create multiple identical workers that can all handle complete requests from start to finish. This is called data parallelism—you're running multiple copies of the same model to serve more users simultaneously.
+
+The key innovation here is **KV cache sharing**. When one worker processes a request, it stores intermediate computations (the "KV cache") that other workers can reuse. If a follow-up question or similar request arrives, a different worker can grab that cached data over the network instead of recomputing everything from scratch. This speeds up responses for conversations and repeated queries.
+
+You'll deploy 2 workers (each using 1 GPU) that automatically discover each other through Kubernetes and share cached data using NIXL, a high-speed data transfer layer. This architecture scales horizontally—you can add more workers across multiple nodes to handle more traffic.
+
+**How this differs from Lab 1:**
+- Lab 1 used **disaggregated serving** with specialized workers (one does prefill, one does decode)
+- Lab 3 uses **distributed serving** with generalist workers (each can do everything)
+- Lab 1's workers are tightly coupled (must work together on each request)
+- Lab 3's workers are independent (can serve different users, but share cache to help each other)
+
+**Using them together:**
+You could run both architectures side-by-side in the same cluster for different models or workloads. Use disaggregated serving (Lab 1) when you need predictable latency for each request. Use distributed serving (Lab 3) when you have high traffic with repeated patterns (like many users asking similar questions) where cache sharing provides significant speedups.
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
-**What You'll Learn:**
-- How Dynamo discovers and coordinates workers across GPUs/nodes
-- KV cache sharing between workers for improved performance
-- Two deployment modes: Standard (built-in) vs Advanced (NATS/etcd)
-- Monitoring distributed inference metrics
-
-**Note**: Distributed Dynamo is designed for multi-node Kubernetes clusters or single nodes with multiple GPUs. While we'll deploy it on a single node for learning purposes, maximum benefits are realized when scaling across multiple nodes with high cache hit workloads.
-
-## Duration: ~45 minutes (standard path) / ~75 minutes (with optional NATS/etcd)
+**Duration**: ~45 minutes
 
 ---
 

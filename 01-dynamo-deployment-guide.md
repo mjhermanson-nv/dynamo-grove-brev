@@ -16,18 +16,11 @@ jupyter:
 
 ## Overview
 
-In this lab, you will:
-- Set up Kubernetes cluster with Dynamo platform
-- Deploy Dynamo, NVIDIA's inference serving framework
-- Configure a model using disaggregated serving (separate prefill and decode workers)
-- Test the deployment with OpenAI-compatible API
-- Benchmark the deployment using AI-Perf
+In this lab, you'll deploy a **disaggregated serving** model on Kubernetes using NVIDIA Dynamo. This architecture separates the inference workload into two specialized workers: one handles the initial prompt processing (prefill), and another generates the response tokens (decode). By splitting these tasks, each worker can be optimized for its specific job, leading to better GPU utilization and more predictable performance.
 
-**What You'll Learn:**
-- How to deploy Dynamo on Kubernetes
-- Understanding disaggregated serving architecture
-- Using Dynamo's OpenAI-compatible API
-- Monitoring inference performance
+You'll deploy a small language model (Qwen 1.5B) that runs on a single node with 2 GPUs—one GPU for the prefill worker and one for the decode worker. After deployment, you'll test the model using OpenAI-compatible APIs (the same format as ChatGPT's API) and run performance benchmarks to measure response quality.
+
+This is the foundation for understanding Dynamo's capabilities. In Lab 2, you'll add monitoring to observe what's happening inside your deployment. In Lab 3, you'll see a different architecture where multiple workers share their work more dynamically.
 
 **Duration**: ~90 minutes
 
