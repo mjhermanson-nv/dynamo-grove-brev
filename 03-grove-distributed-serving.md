@@ -352,6 +352,8 @@ echo "  Workers: 2 (data parallelism with KV cache sharing via NIXL)"
 Expose the frontend for testing:
 
 ```bash
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
 # Create NodePort service
 cat <<'EOF' | kubectl apply -f -
 apiVersion: v1
@@ -385,7 +387,7 @@ echo "Waiting for distributed Dynamo deployment..."
 echo "This may take 2-3 minutes for model download and initialization..."
 echo ""
 
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready --timeout=300s \
@@ -405,7 +407,7 @@ echo "✓ Distributed Dynamo deployment ready"
 ```bash
 # Test the deployment
 echo "Testing inference..."
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -456,7 +458,7 @@ Generate meaningful traffic to see distributed coordination in action:
 ```bash
 # Generate test traffic with concurrent requests
 echo "Generating traffic to distributed Dynamo deployment..."
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 # Function to send a request
 send_request() {
@@ -594,23 +596,23 @@ Check distributed coordination through worker logs:
 
 ```bash
 # Get cache stats from worker logs
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    echo "Checking NIXL/NATS activity in worker logs..."
+    echo "Checking NIXL activity in worker logs..."
     echo ""
-    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl\|nats" | tail -10
+    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl" | tail -10
     
     echo ""
     echo "Worker pod: $WORKER_POD"
     echo ""
     echo "What to look for:"
     echo "  - NIXL initialization messages (KV cache transfer setup)"
-    echo "  - NATS connection status (coordination layer)"
     echo "  - KV cache registration events"
     echo "  - UCX backend messages (if using RDMA for cache transfer)"
+    echo "  - K8s service discovery messages"
 else
     echo "⚠️ No worker pods found"
     echo "Make sure the vllm-distributed-demo deployment is running"
@@ -618,42 +620,6 @@ fi
 ```
 
 **Note**: Cache hit/miss metrics depend on workload patterns. Even on a single node with multiple GPUs, KV-aware routing can improve cache hits by directing requests to the worker that already has relevant cache blocks.
-
-### NATS Health Check
-
-Verify NATS is functioning correctly:
-
-```bash
-# Check NATS service health
-echo "Checking NATS health..."
-kubectl exec -n nats-system nats-0 -- nats-server --version 2>/dev/null || kubectl get pods -n nats-system
-
-echo ""
-echo "NATS endpoints:"
-kubectl get svc -n nats-system
-```
-
-### etcd Health Check
-
-Verify etcd cluster health:
-
-```bash
-# Check etcd health
-echo "Checking etcd health..."
-ETCD_POD=$(kubectl get pods -n etcd-system -l app.kubernetes.io/name=etcd -o jsonpath='{.items[0].metadata.name}')
-
-if [ -n "$ETCD_POD" ]; then
-    kubectl exec -n etcd-system $ETCD_POD -- etcdctl endpoint health 2>/dev/null || echo "etcd health check requires auth setup"
-    echo ""
-    kubectl exec -n etcd-system $ETCD_POD -- etcdctl member list 2>/dev/null || echo "etcd member list requires auth setup"
-else
-    echo "⚠️ No etcd pods found"
-fi
-
-echo ""
-echo "etcd endpoints:"
-kubectl get svc -n etcd-system
-```
 
 ---
 
@@ -664,7 +630,7 @@ kubectl get svc -n etcd-system
 ```bash
 # Delete the distributed deployment
 echo "Removing distributed Dynamo deployment..."
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 kubectl delete dynamographdeployment vllm-distributed-demo -n $NAMESPACE
 kubectl delete svc vllm-distributed-demo-frontend-np -n $NAMESPACE
@@ -678,8 +644,8 @@ Your original Lab 1 deployment should still be running on port 30100:
 
 ```bash
 # Check Lab 1 deployment status
-NAMESPACE=${NAMESPACE:-dynamo}
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export NAMESPACE=${NAMESPACE:-dynamo}
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 echo "Checking Lab 1 deployment..."
 kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE
@@ -795,7 +761,7 @@ echo "  curl http://$NODE_IP:30100/v1/models"
 
 ```bash
 # Check deployment status
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 kubectl describe dynamographdeployment vllm-distributed-demo -n $NAMESPACE
 
 # Check pod status
@@ -814,7 +780,7 @@ kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker
 
 ```bash
 # Check K8s services and endpoints
-NAMESPACE=${NAMESPACE:-dynamo}
+export NAMESPACE=${NAMESPACE:-dynamo}
 kubectl get svc -n $NAMESPACE
 kubectl get endpoints -n $NAMESPACE
 
@@ -834,7 +800,8 @@ kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker
 
 ```bash
 # Test frontend endpoint
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export NAMESPACE=${NAMESPACE:-dynamo}
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 curl -v http://$NODE_IP:30200/v1/models
 
 # Check frontend logs
