@@ -386,131 +386,7 @@ echo "✓ Sent 10 test requests - check Grafana dashboard for updated metrics!"
 
 ---
 
-## Section 5: Planner Observability Dashboard (New in v0.8.0)
-
-### Objectives
-- Understand the Planner component in Dynamo's architecture
-- Import and configure the Planner observability dashboard
-- Monitor request routing and KV cache decisions
-
-### What is the Planner?
-
-The **Planner** is Dynamo's intelligent request router that makes critical decisions:
-- Which worker should handle each request (prefill vs. decode)
-- KV cache placement and reuse strategies
-- Load balancing across workers
-- Request batching decisions
-
-In v0.8.0, the Planner has enhanced observability with dedicated metrics for production debugging.
-
-### Import Planner Dashboard
-
-The Planner dashboard helps you understand:
-- Request routing decisions
-- KV cache hit/miss rates
-- Worker selection logic
-- Queue depths and backpressure
-
-**Note:** This dashboard is available starting with Dynamo v0.8.0.
-
-
-```bash
-export NAMESPACE=${NAMESPACE:-dynamo}
-export GRAFANA_URL=${GRAFANA_URL:-"http://$(hostname -I | awk '{print $1}'):30080"}
-
-# Create Planner dashboard ConfigMap in monitoring namespace
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-dashboard-dynamo-planner
-  namespace: monitoring
-  labels:
-    grafana_dashboard: "1"
-data:
-  dynamo-planner-dashboard.json: |
-    {
-      "dashboard": {
-        "title": "Dynamo Planner Observability",
-        "tags": ["dynamo", "planner", "v0.8.0"],
-        "timezone": "browser",
-        "panels": [
-          {
-            "title": "Request Routing Decisions",
-            "targets": [
-              {
-                "expr": "rate(dynamo_planner_routing_decisions_total[5m])",
-                "legendFormat": "{{decision_type}}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "KV Cache Hit Rate",
-            "targets": [
-              {
-                "expr": "rate(dynamo_planner_kv_cache_hits_total[5m]) / rate(dynamo_planner_kv_cache_lookups_total[5m])",
-                "legendFormat": "Cache Hit Rate"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Worker Queue Depths",
-            "targets": [
-              {
-                "expr": "dynamo_planner_worker_queue_depth",
-                "legendFormat": "{{worker_id}}"
-              }
-            ],
-            "type": "graph"
-          },
-          {
-            "title": "Planning Latency (p95)",
-            "targets": [
-              {
-                "expr": "histogram_quantile(0.95, rate(dynamo_planner_decision_duration_seconds_bucket[5m]))",
-                "legendFormat": "p95 Planning Latency"
-              }
-            ],
-            "type": "graph"
-          }
-        ]
-      }
-    }
-EOF
-
-echo ""
-echo "✓ Planner dashboard ConfigMap created in monitoring namespace"
-echo "  Dashboard will auto-import to Grafana within ~30 seconds"
-echo "  View at: $GRAFANA_URL"
-```
-
-### Access Planner Dashboard
-
-```bash
-echo "Grafana URL: $GRAFANA_URL"
-echo ""
-echo "Navigate to: Dashboards → Dynamo Planner Observability"
-echo ""
-echo "(Anonymous access enabled - no login required)"
-```
-
-### Key Planner Metrics
-
-| Metric | Description | What to Watch |
-|--------|-------------|---------------|
-| `dynamo_planner_routing_decisions_total` | Routing decisions made | Decision type distribution |
-| `dynamo_planner_kv_cache_hits_total` | KV cache hits | High hit rate = efficient reuse |
-| `dynamo_planner_kv_cache_lookups_total` | Total cache lookups | Cache utilization |
-| `dynamo_planner_worker_queue_depth` | Requests queued per worker | Backpressure indicators |
-| `dynamo_planner_decision_duration_seconds` | Time to make routing decision | Planning overhead |
-
-**Optimization Tip:** High KV cache hit rates (>70%) indicate effective prompt caching and can significantly reduce latency and costs.
-
----
-
-## Section 6: Unified Tracing with OpenTelemetry (New in v0.8.0)
+## Section 5: Unified Tracing with OpenTelemetry (New in v0.8.0)
 
 ### Objectives
 - Understand distributed tracing in Dynamo
@@ -578,7 +454,7 @@ With tracing enabled, you can see:
 
 ---
 
-## Section 7: Understanding Key Metrics
+## Section 6: Understanding Key Metrics
 
 ### Frontend Metrics
 
@@ -638,7 +514,7 @@ rate(dynamo_frontend_output_sequence_tokens_sum[5m]) / rate(dynamo_frontend_outp
 
 ---
 
-## Section 8: Exercises and Exploration
+## Section 7: Exercises and Exploration
 
 ### Exercise 1: Correlate Load with Latency
 
@@ -773,24 +649,9 @@ echo "      Only your PodMonitors and dashboard ConfigMap were removed."
 
 ---
 
-## Known Issues (v0.8.0 Observability)
+## Known Issues
 
-**⚠️ Monitoring-Specific Issues:**
-
-1. **Planner Dashboard Initial Load**: The Planner dashboard (new in v0.8.0) may show "No data" for the first 2-3 minutes after deployment. Metrics start appearing once requests flow through the system.
-
-2. **OpenTelemetry Trace Sampling**: Default trace sampling is 10% to reduce overhead. For debugging, increase sampling rate in deployment annotations: `opentelemetry.io/sample-rate: "1.0"`.
-
-3. **Grafana Dashboard Auto-Import Delay**: ConfigMaps with `grafana_dashboard: "1"` label may take 30-60 seconds to appear in Grafana. Refresh the dashboards list if not immediately visible.
-
-4. **PodMonitor Label Selectors**: Ensure your PodMonitor `matchLabels` exactly match the pod labels. Case-sensitive. Use `kubectl describe podmonitor` to debug.
-
-**Workarounds:**
-- For missing metrics: Check PodMonitor status: `kubectl get podmonitors -n $NAMESPACE -o yaml`
-- For tracing issues: Verify OTLP endpoint is reachable: `kubectl logs <pod> | grep -i otel`
-- Dashboard not loading: Manually import JSON from ConfigMap
-
-**New in v0.8.0:** Unified tracing and Planner observability are production-ready but may have edge cases. Report issues to the team.
+For known issues related to Dynamo v0.8.0 observability features, see the [Known Issues section in the main repository](https://github.com/ai-dynamo/dynamo/blob/main/KNOWN_ISSUES.md).
 
 ---
 
