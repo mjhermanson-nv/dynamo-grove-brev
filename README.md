@@ -48,38 +48,15 @@ Learn distributed serving concepts with Grove:
 
 ## 🚀 Quick Start
 
-### Prerequisites
+This workshop is designed to run on Brev workspaces with pre-configured GPU infrastructure.
 
-- A Brev workspace with GPU support (tested with 2x L40s GPUs)
-- Access to NVIDIA NGC (for Dynamo Helm charts and container images)
-- Access to HuggingFace (for model downloads)
+### Getting Started
 
-**Note**: These guides use Brev-specific features like Grafana tunneling (`https://grafana0-{hostname}.brevlab.com/`). Adapting to other platforms will require modifying networking configurations.
+1. Open this workspace in Brev
+2. Start Jupyter Lab (if not already running)
+3. Open `01-dynamo-deployment-guide.ipynb` to begin
 
-### Bootstrap from Scratch
-
-Use the included bootstrap script to set up everything:
-
-```bash
-# Clone the repository
-git clone https://github.com/mjhermanson-nv/dynamo-grove-brev.git
-cd dynamo-grove-brev
-
-# Run the bootstrap (installs microk8s, kubectl, helm, k9s, GPU operator, storage, monitoring)
-sudo ./oneshot.sh
-
-# Start Jupyter Lab
-jupyter lab
-```
-
-The bootstrap script installs:
-- Kubernetes (microk8s)
-- Essential CLI tools (kubectl, helm, k9s)
-- NVIDIA GPU operator
-- Storage provisioning (local-path)
-- Prometheus & Grafana (cluster-wide monitoring)
-
-Once complete, open `01-dynamo-deployment-guide.ipynb` to begin.
+**Note**: These guides use Brev-specific features like Grafana tunneling and pre-configured Kubernetes clusters.
 
 ## 📖 Guide Structure
 
