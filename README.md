@@ -9,42 +9,24 @@ Interactive Jupyter notebooks for learning and deploying NVIDIA Dynamo on Kubern
 ### 01 - Dynamo Deployment Guide
 **File**: `01-dynamo-deployment-guide.ipynb`
 
-Deploy and manage LLM inference workloads using Dynamo on Kubernetes:
-- Set up NGC and HuggingFace credentials
-- Install Dynamo platform with cluster-wide operator
-- Deploy disaggregated serving architecture (separate prefill/decode workers)
-- Test deployment with OpenAI-compatible API
-- Benchmark performance with AI-Perf
+Deploy a **disaggregated serving** model where inference workloads are split between specialized workers. One worker handles prompt processing (prefill) while another generates response tokens (decode). This architecture optimizes GPU utilization by dedicating resources to each task. You'll deploy a small language model (Qwen 1.5B) on 2 GPUs, test it using OpenAI-compatible APIs, and run performance benchmarks.
 
 **Duration**: ~90 minutes
 
 ### 02 - Monitoring and Observability
 **File**: `02-monitoring-and-observability.ipynb`
 
-Monitor your Dynamo deployments with Prometheus and Grafana:
-- Verify cluster-wide Grafana and Prometheus installation
-- Configure PodMonitors for Dynamo metrics collection
-- Deploy and view Dynamo inference dashboard
-- Generate load and analyze performance metrics
-- Understand key metrics: TTFT, inter-token latency, throughput
-- Create custom Prometheus alerts
+Add monitoring to your Dynamo deployment using the cluster's built-in Prometheus and Grafana. You'll configure automatic metrics collection from your deployment, import a pre-built dashboard showing key performance indicators, and learn to interpret critical metrics like time-to-first-token (TTFT) and inter-token latency (ITL). Generate load and watch real-time metrics to understand your deployment's behavior.
 
 **Duration**: ~20 minutes
 
 ### 03 - Distributed Serving with Grove
 **File**: `03-grove-distributed-serving.ipynb`
 
-Learn distributed serving concepts with Grove:
-- Understand Grove architecture and multi-frontend load balancing
-- Deploy distributed coordination infrastructure (NATS, etcd)
-- Create Grove-enabled Dynamo deployments with NATS discovery
-- Monitor NATS and etcd with Grafana dashboards
-- Generate traffic and analyze distributed metrics
-- Understand single-node vs multi-node trade-offs
-- Learn when to use Grove in production
+Deploy a **distributed serving** architecture where multiple identical workers collaborate to serve requests. Unlike Lab 1's specialized workers, these workers can each handle complete requests and share cached computations (KV cache) over the network using NIXL. This enables horizontal scaling and improved performance for workloads with repeated or similar queries. You'll deploy 2 workers that automatically discover each other through Kubernetes and learn when to use distributed vs disaggregated architectures.
 
 **Duration**: ~45 minutes  
-**Note**: Teaches distributed systems concepts using a single-node setup for learning
+**Note**: Uses K8s-native discovery (v0.8.0). Optional NATS/etcd setup for extreme scale included in appendices.
 
 ## 🚀 Quick Start
 
