@@ -26,3 +26,6 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Cloned repositories (for reference)
+.dynamo-reference/
