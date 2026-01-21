@@ -12,7 +12,7 @@ jupyter:
       jupytext_version: 1.18.1
 ---
 
-# Lab 3: Distributed Dynamo with Multi-GPU/Multi-Node Serving
+# Lab 3: KV-Aware Routing with Data-Parallel Workers
 
 ## Overview
 
@@ -213,17 +213,17 @@ Requests 2-3 reuse cached prefill computation from Request 1
 - NIXL transfers cache data between nodes over the network (RDMA/TCP)
 - Kubernetes Services automatically load balance traffic across frontend replicas
 
-### When to Use Distributed Dynamo
+### When to Use KV-Aware Routing
 
-| Scenario | Use Distributed Dynamo? | Why |
+| Scenario | Use KV-Aware Routing? | Why |
 |----------|-----------|-----|
-| Single GPU | ❌ No | Adds overhead without benefit |
-| Multiple GPUs, single node | ✅ Yes | KV-aware routing improves cache hits between GPU workers |
-| 2-3 nodes | ✅ Yes | Cache awareness and coordination provide benefits |
-| 4+ nodes | ✅ Strongly Yes | Significant performance improvements from distributed cache awareness |
-| High traffic, repeated queries | ✅ Yes | Cache-aware routing reduces latency |
-| Low traffic, unique queries | ⚠️ Maybe | Lower cache hit rates, but coordination still useful |
-| Dynamo 0.8+ | ℹ️ Info | Can use K8s-native discovery (no NATS/etcd required) for simple deployments |
+| Single worker | ❌ No | No routing decisions to make (only 1 worker) |
+| Multiple workers, single node | ✅ Yes | Router directs requests to workers with cached prefixes |
+| 2-3 nodes | ✅ Yes | Cache-aware routing works across nodes |
+| 4+ nodes | ✅ Yes | Coordination via NATS scales well |
+| High traffic, repeated queries | ✅ Yes | High cache hit potential |
+| Low traffic, unique queries | ⚠️ Maybe | Lower cache hit rates, coordination overhead |
+| Conversation/chatbot workloads | ✅ Strongly Yes | Shared prefixes and system prompts benefit greatly |
 
 ---
 
@@ -810,24 +810,24 @@ Check distributed coordination through worker logs:
 # Get cache stats from worker logs
 export NAMESPACE=${NAMESPACE:-dynamo}
 
-WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    echo "Checking NIXL activity in worker logs..."
+    echo "Checking cache activity in worker logs..."
     echo ""
-    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "nixl" | tail -10
+    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "cache\|prefix" | tail -10
     
     echo ""
     echo "Worker pod: $WORKER_POD"
     echo ""
     echo "What to look for:"
-    echo "  - NIXL initialization messages (KV cache transfer setup)"
-    echo "  - KV cache registration events"
-    echo "  - UCX backend messages (if using RDMA for cache transfer)"
-    echo "  - K8s service discovery messages"
+    echo "  - Prefix cache hits/misses"
+    echo "  - KV cache block creation events"
+    echo "  - Cache eviction messages"
+    echo "  - NATS connection status"
 else
     echo "⚠️ No worker pods found"
-    echo "Make sure the vllm-distributed-demo deployment is running"
+    echo "Make sure the vllm-kv-demo deployment is running"
 fi
 ```
 
@@ -837,17 +837,17 @@ fi
 
 ## Section 7: Cleanup
 
-### Step 1: Remove Distributed Demo Deployment
+### Step 1: Remove KV-Aware Routing Deployment
 
 ```bash
-# Delete the distributed deployment
-echo "Removing distributed Dynamo deployment..."
+# Delete the KV-aware routing deployment
+echo "Removing KV-aware routing deployment..."
 export NAMESPACE=${NAMESPACE:-dynamo}
 
-kubectl delete dynamographdeployment vllm-distributed-demo -n $NAMESPACE
-kubectl delete svc vllm-distributed-demo-frontend-np -n $NAMESPACE
+kubectl delete dynamographdeployment vllm-kv-demo -n $NAMESPACE
+kubectl delete svc vllm-kv-frontend-np -n $NAMESPACE
 
-echo "✓ Distributed deployment removed"
+echo "✓ KV-aware routing deployment removed"
 ```
 
 ### Step 2: Verify Lab 1 Deployment is Still Running
@@ -877,11 +877,12 @@ echo "  curl http://$NODE_IP:30100/v1/models"
 
 ## Summary
 
-You've deployed a distributed Dynamo architecture where multiple workers collaborate to serve requests. Unlike Lab 1's disaggregated approach (specialized prefill/decode workers), this distributed model uses identical workers that share cached computations over the network via NIXL.
+You've deployed KV-aware routing with data-parallel workers, where the router intelligently directs requests to workers based on their cached data.
 
-**What makes this powerful:**
-- Workers discover each other automatically through Kubernetes
-- KV cache sharing speeds up similar or follow-up requests
+**What you learned:**
+- NATS coordinates cache state across workers (events published/subscribed)
+- Router tracks which workers have cached which prefixes
+- Requests with similar prefixes get routed to the same worker for cache reuse
 - Scales horizontally—add more workers for more traffic
 - Works on single nodes with multiple GPUs or across multi-node clusters
 
@@ -900,10 +901,10 @@ You've deployed a distributed Dynamo architecture where multiple workers collabo
 ```bash
 # Check deployment status
 export NAMESPACE=${NAMESPACE:-dynamo}
-kubectl describe dynamographdeployment vllm-distributed-demo -n $NAMESPACE
+kubectl describe dynamographdeployment vllm-kv-demo -n $NAMESPACE
 
 # Check pod status
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
 
 # Check worker logs
 kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker
@@ -946,7 +947,7 @@ curl -v http://$NODE_IP:30200/v1/models
 kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend
 
 # Verify NodePort service exists
-kubectl get svc vllm-distributed-demo-frontend-np -n $NAMESPACE
+kubectl get svc vllm-kv-frontend-np -n $NAMESPACE
 
 # Common issues:
 # - NodePort service not created
@@ -1286,6 +1287,6 @@ Refer to Dynamo documentation for complete configuration options.
 
 ---
 
-**Congratulations! You've completed Lab 3: Distributed Dynamo with Grove Orchestration** 🌲
+**Congratulations! You've completed Lab 3: KV-Aware Routing** 🎯
 
-You now understand the fundamentals of distributed LLM serving, the difference between Grove (operator) and Dynamo (serving framework), and how K8s-native discovery enables distributed coordination!
+You now understand how KV-aware routing works, how NATS coordinates cache state across workers, and how intelligent request placement can improve cache hit rates for workloads with repeated prompt patterns!
