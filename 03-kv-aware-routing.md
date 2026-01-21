@@ -747,9 +747,9 @@ curl -s http://$NODE_IP:30200/health || echo "Service not ready yet"
 
 #### Install AI-Perf
 
-If not already installed:
+If not already installed, run in a terminal:
 
-```bash
+```
 pip install -q aiperf
 ```
 
