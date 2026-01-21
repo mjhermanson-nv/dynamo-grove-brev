@@ -64,117 +64,55 @@ Traditional load balancers distribute requests randomly or in round-robin fashio
 4. Worker 1 reuses the cached computation for "Explain quantum computing", only processes the new part
 5. Result: **Much faster** time-to-first-token (TTFT)
 
-### Architecture Components
-
-```
-Client Request
-      ↓
-Frontend (OpenAI API)
-      ↓
-KV-Aware Router ←──── NATS (KV Events) ←──── Workers publish cache events
-      ↓                                              ↓
-   Analyzes:                                   "I cached blocks 0-5"
-   - Input tokens                              "I removed block 3"
-   - Cached blocks per worker                  "I stored block 10"
-   - Worker load
-      ↓
-   Selects best worker
-      ↓
-Worker 1 or Worker 2 (Data Parallel - identical)
-      ↓
-Response to Client
-```
-
-**Key Components:**
-
-1. **Frontend**: OpenAI-compatible API server
-2. **KV-Aware Router**: Tracks global cache state, selects optimal worker
-3. **NATS**: Message bus for cache event coordination
-4. **Workers**: Identical inference engines (vLLM/SGLang/TensorRT-LLM)
-
-### How Cache Events Work
-
-Each worker publishes events to NATS when cache blocks are created or removed:
-
-```python
-# When a worker processes a request:
-worker.process_prompt("Explain quantum computing")
-  → Stores KV blocks 0, 1, 2, 3, 4, 5
-  → Publishes to NATS: "Worker-1: Stored blocks [0,1,2,3,4,5] with hash XYZ"
-
-# Router receives event and updates its global view:
-router.cache_index["Worker-1"]["XYZ"] = [0,1,2,3,4,5]
-
-# Next similar request arrives:
-new_request = "Explain quantum computing in simple terms"
-  → Router checks: Which worker has matching prefix?
-  → Finds: Worker-1 has blocks 0-5 matching this prefix
-  → Routes to Worker-1 (avoids recomputation)
-
-# Worker-1 reuses cached blocks:
-worker1.process_request()
-  → Blocks 0-5: CACHED (instant)
-  → Blocks 6-10: NEW (compute only these)
-```
-
-### Why NATS is Required
-
-**The Problem**: How does the router know which worker has which cache blocks?
-
-**The Solution**: Workers publish cache events to NATS, router subscribes to these events.
-
-**Why not just Kubernetes?**
-- K8s APIs are for service discovery (which workers exist), not cache coordination (what's cached where)
-- Cache events happen thousands of times per second - too fast for K8s APIs
-- NATS provides low-latency pub/sub specifically designed for this use case
+### How KV-Aware Routing Works
 
 **Architecture:**
 ```
 ┌──────────┐  ┌──────────┐
-│ Worker 1 │  │ Worker 2 │
+│ Worker 1 │  │ Worker 2 │  (Data-parallel: identical workers)
 └────┬─────┘  └────┬─────┘
      │             │
      └─────────────┘
             │ Publish cache events
             ↓
    ┌────────────────┐
-   │  NATS Server   │
+   │  NATS Server   │  (Message bus for cache coordination)
    │  (Message Bus) │
    └────────┬───────┘
             │ Subscribe to events
             ↓
    ┌────────────────┐
-   │  KV Router     │
+   │  KV Router     │  (Tracks which worker has which cached blocks)
    │ (Global Index) │
    └────────────────┘
+            ↓
+   Routes requests to workers with matching cached prefixes
 ```
 
-### Data Parallelism vs Disaggregated Serving
+**The Flow:**
+1. **Request arrives**: "Explain quantum computing"
+2. **Router checks cache index**: No worker has this cached → picks Worker 1
+3. **Worker 1 processes**: Creates KV cache blocks 0-5
+4. **Worker 1 publishes to NATS**: "I cached blocks 0-5 for prefix 'Explain quantum computing'"
+5. **Router updates index**: Worker 1 has these blocks
+6. **Next request arrives**: "Explain quantum computing in simple terms"
+7. **Router checks cache index**: Worker 1 has matching prefix → routes to Worker 1
+8. **Worker 1 reuses cache**: Blocks 0-5 already computed, only processes new tokens
 
-**Lab 1 (Disaggregated Serving):**
-- Prefill Worker → Decode Worker (pipeline)
-- Workers are specialized (different roles)
-- Tight coupling (must work together)
-- 1 request = 1 prefill worker + 1 decode worker
-
-**Lab 3 (Data Parallel with KV-Aware Routing):**
-- Worker 1, Worker 2 (both identical)
-- Workers are independent (same role)
-- Loose coupling (work in parallel)
-- 1 request = 1 worker (router chooses which)
+**Why NATS?** Kubernetes provides service discovery (which workers exist) but not cache coordination (what's cached where). NATS handles thousands of cache events per second with low latency.
 
 ### When KV-Aware Routing Helps
 
-**High Cache Hit Workloads:**
-- ✅ Chatbots (conversation history repeats)
-- ✅ Document Q&A (same document, multiple questions)
+**Best for:**
+- ✅ Chatbots and conversational AI (repeated system prompts, conversation history)
+- ✅ Document Q&A (same document, different questions)
+- ✅ Batch processing with shared prefixes
 - ✅ Code assistants (repeatedly analyzing same files)
-- ✅ System prompt reuse (same instructions for many requests)
 
-**Low Cache Hit Workloads:**
-- ⚠️ Random questions (no shared context)
-- ⚠️ One-shot requests (no follow-ups)
-- ⚠️ Completely unique prompts each time
+**Not ideal for:**
+- ⚠️ Completely unique prompts every time
+- ⚠️ Single worker deployments (no routing decisions to make)
+- ⚠️ Very short contexts (cache overhead exceeds benefit)
 
 ### Performance Impact
 
