@@ -371,7 +371,6 @@ metadata:
 spec:
   services:
     Frontend:
-      dynamoNamespace: vllm-kv-demo
       componentType: frontend
       replicas: 1
       extraPodSpec:
@@ -393,7 +392,6 @@ spec:
               value: info
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-kv-demo
       componentType: worker
       replicas: 2
       resources:
@@ -793,9 +791,6 @@ aiperf profile \
 
 #### What to Observe
 
-- **TTFT (Time To First Token)** - lower is better
-- **Request throughput** - higher concurrency should utilize both workers
-- **Router decision logs** - Check frontend logs to see KV-aware routing in action:
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
