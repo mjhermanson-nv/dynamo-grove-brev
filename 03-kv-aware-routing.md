@@ -702,13 +702,6 @@ echo "   Run the same prompt 2-3 times and compare TTFT (Time To First Token)"
 echo "   Second+ requests should be noticeably faster with cache hits"
 ```
 
-**How to confirm KV-aware routing is working:**
-
-1. **NATS connected**: Worker logs show successful NATS connection and endpoint registration
-2. **Router in KV mode**: Frontend logs show `router_mode: kv` and KV overlap scoring
-3. **Faster subsequent requests**: Requests with shared prefixes complete faster (visible via `time curl` or benchmark tools)
-4. **Same worker handling similar requests**: Using verbose logging (DEBUG level), you can see the same worker pod handling requests with shared prefixes
-
 ---
 
 ## Summary
