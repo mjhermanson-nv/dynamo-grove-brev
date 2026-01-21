@@ -129,18 +129,6 @@ Traditional load balancers distribute requests randomly or in round-robin fashio
 > - Kubernetes Services automatically load balance across frontend replicas
 > - KV-aware routing works across nodes via NATS coordination
 
-### When to Use KV-Aware Routing
-
-| Scenario | Use KV-Aware Routing? | Why |
-|----------|-----------|-----|
-| Single worker | ❌ No | No routing decisions to make (only 1 worker) |
-| Multiple workers, single node | ✅ Yes | Router directs requests to workers with cached prefixes |
-| 2-3 nodes | ✅ Yes | Cache-aware routing works across nodes |
-| 4+ nodes | ✅ Yes | Coordination via NATS scales well |
-| High traffic, repeated queries | ✅ Yes | High cache hit potential |
-| Low traffic, unique queries | ⚠️ Maybe | Lower cache hit rates, coordination overhead |
-| Conversation/chatbot workloads | ✅ Strongly Yes | Shared prefixes and system prompts benefit greatly |
-
 ---
 
 ## Section 2: Deploy NATS for Cache Coordination
