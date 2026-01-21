@@ -170,11 +170,6 @@ echo "  Connection: nats://nats.nats-system:4222"
 echo "  JetStream: Enabled (1Gi memory + 2Gi disk)"
 ```
 
-**What this enables:**
-- Cache event streaming from workers
-- Persistent event storage (survives pod restarts)
-- Router state recovery after crashes
-
 ### Step 3: Verify NATS Deployment
 
 ```bash
