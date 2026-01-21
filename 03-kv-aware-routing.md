@@ -154,20 +154,35 @@ JetStream provides persistent event storage, allowing routers to recover cache s
 # Create namespace for NATS
 kubectl create namespace nats-system --dry-run=client -o yaml | kubectl apply -f -
 
+# Create NATS values file with JetStream configuration
+cat > /tmp/nats-values.yaml <<EOF
+nats:
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      dir: /data
+      pvc:
+        enabled: true
+        size: 10Gi
+
+config:
+  merge:
+    jetstream:
+      max_file_store: 10737418240  # 10GB in bytes
+      store_dir: /data
+EOF
+
 # Install NATS with JetStream enabled
 echo "Installing NATS with JetStream..."
 helm upgrade --install nats nats/nats \
   --namespace nats-system \
-  --set nats.jetstream.enabled=true \
-  --set nats.jetstream.memStorage.enabled=true \
-  --set nats.jetstream.memStorage.size=1Gi \
-  --set nats.jetstream.fileStorage.enabled=true \
-  --set nats.jetstream.fileStorage.size=2Gi \
+  --values /tmp/nats-values.yaml \
   --wait
 
 echo "✓ NATS installed successfully"
 echo "  Connection: nats://nats.nats-system:4222"
-echo "  JetStream: Enabled (1Gi memory + 2Gi disk)"
+echo "  JetStream: Enabled with 10Gi file storage"
 ```
 
 ### Step 3: Verify NATS Deployment
