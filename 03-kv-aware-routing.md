@@ -119,13 +119,15 @@ Traditional load balancers distribute requests randomly or in round-robin fashio
 **In this lab (single node, 2 GPUs):**
 - Each GPU runs a separate worker
 - Router can direct requests to the worker with the best KV cache match
-- NIXL can transfer cache data between workers on the same node
+- Workers store their own local KV cache (no transfer between workers in data-parallel mode)
 
-**In production (multi-node):**
-- Scale workers across multiple nodes
-- Scale frontends for high availability (multiple frontend replicas)
-- NIXL transfers cache data between nodes over the network (RDMA/TCP)
-- Kubernetes Services automatically load balance traffic across frontend replicas
+> **💡 Note: Production Multi-Node Deployments**
+> 
+> In production environments with multiple nodes:
+> - Scale workers across nodes for higher throughput
+> - Deploy multiple frontend replicas for high availability
+> - Kubernetes Services automatically load balance across frontend replicas
+> - KV-aware routing works across nodes via NATS coordination
 
 ### When to Use KV-Aware Routing
 
