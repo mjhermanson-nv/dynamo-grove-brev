@@ -16,116 +16,179 @@ jupyter:
 
 ## Overview
 
-In this lab, you'll deploy a **distributed serving** model that works differently from Lab 1. Instead of dedicating specific workers to prefill or decode tasks, you'll create multiple identical workers that can all handle complete requests from start to finish. This is called data parallelism—you're running multiple copies of the same model to serve more users simultaneously.
+In this lab, you'll learn about **KV-aware routing**, an intelligent load balancing feature that routes requests to workers based on their cached data. Unlike simple round-robin routing, KV-aware routing tracks which workers have already processed similar prompts and directs new requests to workers with matching cached blocks. This dramatically reduces the time to first token (TTFT) for repeated or similar queries.
 
-The key innovation here is **KV cache sharing**. When one worker processes a request, it stores intermediate computations (the "KV cache") that other workers can reuse. If a follow-up question or similar request arrives, a different worker can grab that cached data over the network instead of recomputing everything from scratch. This speeds up responses for conversations and repeated queries.
+**The Setup:**
+You'll deploy 2 identical workers (data parallelism) where each worker can handle complete inference requests independently. Instead of random load balancing, you'll use a **KV-aware router** that:
+- Tracks which KV cache blocks each worker has stored
+- Routes requests with similar prefixes to workers that already have those blocks cached
+- Avoids redundant computation by reusing cached prompt processing
 
-You'll deploy 2 workers (each using 1 GPU) that automatically discover each other through Kubernetes and share cached data using NIXL, a high-speed data transfer layer. This architecture scales horizontally—you can add more workers across multiple nodes to handle more traffic.
+**Key Component: NATS Message Bus**
+KV-aware routing requires NATS (a messaging system) to coordinate cache state across workers. Workers publish "cache events" (block created, block removed) to NATS, and the router subscribes to these events to maintain a global view of what's cached where. This is fundamentally different from Lab 1's architecture.
 
 **How this differs from Lab 1:**
-- Lab 1 used **disaggregated serving** with specialized workers (one does prefill, one does decode)
-- Lab 3 uses **distributed serving** with generalist workers (each can do everything)
-- Lab 1's workers are tightly coupled (must work together on each request)
-- Lab 3's workers are independent (can serve different users, but share cache to help each other)
+- **Lab 1**: Disaggregated serving with specialized workers (prefill → decode pipeline)
+- **Lab 3**: Data parallel workers with intelligent cache-aware routing
+- **Lab 1**: Workers cooperate on each request (tightly coupled)
+- **Lab 3**: Workers operate independently, router optimizes placement
+- **Lab 1**: No message bus needed (direct worker communication)
+- **Lab 3**: NATS required for cache coordination
 
-**Using them together:**
-You could run both architectures side-by-side in the same cluster for different models or workloads. Use disaggregated serving (Lab 1) when you need predictable latency for each request. Use distributed serving (Lab 3) when you have high traffic with repeated patterns (like many users asking similar questions) where cache sharing provides significant speedups.
+**When to use KV-aware routing:**
+- Chatbots with conversation history (similar context across turns)
+- Document Q&A systems (multiple questions about the same document)
+- Code completion (repeatedly analyzing the same codebase)
+- Any workload with shared prompt prefixes
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
-**Duration**: ~45 minutes
+**Duration**: ~60 minutes
 
 ---
 
-## Section 1: Understanding Distributed Dynamo Architecture
+## Section 1: Understanding KV-Aware Routing
 
-### What is Grove vs Dynamo?
+### What is KV-Aware Routing?
 
-**Dynamo** is NVIDIA's inference serving framework (the Python code, Router, Frontend, Workers).
+Traditional load balancers distribute requests randomly or in round-robin fashion across workers, treating all workers as identical. But large language models cache intermediate computations (the "KV cache") to avoid reprocessing tokens they've already seen. **KV-aware routing** leverages this by tracking which workers have which cached blocks and intelligently routing requests to workers that can reuse cached data.
 
-**Grove** is the Kubernetes Operator that orchestrates Dynamo deployments (handling CRDs like `DynamoGraphDeployment`, pod gangs, startup order).
+**Example Scenario:**
+1. User asks: "Explain quantum computing" → Router sends to Worker 1
+2. Worker 1 processes the prompt and caches it
+3. User follows up: "Explain quantum computing in simple terms" → Router notices the shared prefix and sends to Worker 1
+4. Worker 1 reuses the cached computation for "Explain quantum computing", only processes the new part
+5. Result: **Much faster** time-to-first-token (TTFT)
 
-**Distributed Dynamo** (orchestrated by Grove) enables:
-- **Multi-node deployments** across Kubernetes clusters or multi-GPU single nodes
-- **KV-aware routing** where the Router knows which worker has which cache blocks
-- **Distributed KV cache transfer** between workers via NIXL (NVIDIA Inference Transfer Library)
-- **Coordination and discovery** using either:
-  - **K8s-native (v0.8.0+)**: EndpointSlices + TCP (simpler, recommended for most use cases)
-  - **NATS/etcd (optional)**: For extreme scale (very large clusters, multi-region, complex topologies)
-
-### Architecture: K8s-Native (Recommended for Most Users)
+### Architecture Components
 
 ```
-               ┌────────────────────────────┐
-               │  Cloud Load Balancer       │
-               │  or Ingress Controller     │
-               └──────────┬─────────────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-    │Frontend 1│    │Frontend 2│    │Frontend 3│
-    │ (Node 1) │    │ (Node 2) │    │ (Node 3) │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │                │                │
-         └────────────────┼────────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │ Kubernetes            │
-              │  - EndpointSlices     │
-              │    (Discovery)        │
-              │  - TCP (Transport)    │
-              └───────────┬───────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
-    │ (Node 4) │    │ (Node 5) │    │ (Node 6) │
-    │  +GPU    │    │  +GPU    │    │  +GPU    │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │                │                │
-         └────────────────┼────────────────┘
-                          │
-              ┌───────────▼───────────┐
-              │  NIXL (KV Cache       │
-              │   Data Transfer)      │
-              │  RDMA/TCP/SSD         │
-              └───────────────────────┘
-
-Benefits:
-- Built-in: Uses Kubernetes service discovery (no extra components)
-- Fast: Direct TCP connections between components
-- Reliable: Fewer moving parts to maintain
-- Recommended for most deployments
-
-Note: Workers require GPU nodes. Frontends don't require GPUs
-      and can run on any node. The diagram shows them on separate
-      nodes, but they can share nodes in smaller clusters.
-
-**For NATS/etcd architecture (extreme scale deployments)**, see Appendix A.
+Client Request
+      ↓
+Frontend (OpenAI API)
+      ↓
+KV-Aware Router ←──── NATS (KV Events) ←──── Workers publish cache events
+      ↓                                              ↓
+   Analyzes:                                   "I cached blocks 0-5"
+   - Input tokens                              "I removed block 3"
+   - Cached blocks per worker                  "I stored block 10"
+   - Worker load
+      ↓
+   Selects best worker
+      ↓
+Worker 1, 2, or 3 (Data Parallel - all identical)
+      ↓
+Response to Client
 ```
 
-### Key Concepts
+**Key Components:**
 
-**Kubernetes-native Discovery (v0.8.0+)**: Built-in service discovery:
-- Uses EndpointSlices (standard Kubernetes API)
-- Workers register with K8s API server automatically
-- Frontends watch EndpointSlices for worker availability
-- No additional infrastructure required
+1. **Frontend**: OpenAI-compatible API server
+2. **KV-Aware Router**: Tracks global cache state, selects optimal worker
+3. **NATS**: Message bus for cache event coordination
+4. **Workers**: Identical inference engines (vLLM/SGLang/TensorRT-LLM)
 
-**TCP Transport (v0.8.0+ default)**: Direct worker communication:
-- Frontends connect to workers via TCP
-- Lower latency than pub/sub patterns
-- Simpler debugging with standard networking tools
+### How Cache Events Work
 
-**NIXL (NVIDIA Inference Transfer Library)**: Handles actual KV cache data transfer:
-- Uses high-speed transports (RDMA, TCP, or CPU/SSD offload)
-- Transfers large tensor data between workers efficiently
-- Direct worker-to-worker communication
-- Works with both K8s-native and NATS/etcd modes
+Each worker publishes events to NATS when cache blocks are created or removed:
 
-**KV-Aware Routing**: The Router knows which worker has which cache blocks:
+```python
+# When a worker processes a request:
+worker.process_prompt("Explain quantum computing")
+  → Stores KV blocks 0, 1, 2, 3, 4, 5
+  → Publishes to NATS: "Worker-1: Stored blocks [0,1,2,3,4,5] with hash XYZ"
+
+# Router receives event and updates its global view:
+router.cache_index["Worker-1"]["XYZ"] = [0,1,2,3,4,5]
+
+# Next similar request arrives:
+new_request = "Explain quantum computing in simple terms"
+  → Router checks: Which worker has matching prefix?
+  → Finds: Worker-1 has blocks 0-5 matching this prefix
+  → Routes to Worker-1 (avoids recomputation)
+
+# Worker-1 reuses cached blocks:
+worker1.process_request()
+  → Blocks 0-5: CACHED (instant)
+  → Blocks 6-10: NEW (compute only these)
+```
+
+### Why NATS is Required
+
+**The Problem**: How does the router know which worker has which cache blocks?
+
+**The Solution**: Workers publish cache events to NATS, router subscribes to these events.
+
+**Why not just Kubernetes?**
+- K8s APIs are for service discovery (which workers exist), not cache coordination (what's cached where)
+- Cache events happen thousands of times per second - too fast for K8s APIs
+- NATS provides low-latency pub/sub specifically designed for this use case
+
+**Architecture:**
+```
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│ Worker 1 │  │ Worker 2 │  │ Worker 3 │
+└────┬─────┘  └────┬─────┘  └────┬─────┘
+     │             │             │
+     └─────────────┼─────────────┘
+                   │ Publish cache events
+                   ↓
+          ┌────────────────┐
+          │  NATS Server   │
+          │  (Message Bus) │
+          └────────┬───────┘
+                   │ Subscribe to events
+                   ↓
+          ┌────────────────┐
+          │  KV Router     │
+          │ (Global Index) │
+          └────────────────┘
+```
+
+### Data Parallelism vs Disaggregated Serving
+
+**Lab 1 (Disaggregated Serving):**
+- Prefill Worker → Decode Worker (pipeline)
+- Workers are specialized (different roles)
+- Tight coupling (must work together)
+- 1 request = 1 prefill worker + 1 decode worker
+
+**Lab 3 (Data Parallel with KV-Aware Routing):**
+- Worker 1, Worker 2, Worker 3 (all identical)
+- Workers are independent (same role)
+- Loose coupling (work in parallel)
+- 1 request = 1 worker (router chooses which)
+
+### When KV-Aware Routing Helps
+
+**High Cache Hit Workloads:**
+- ✅ Chatbots (conversation history repeats)
+- ✅ Document Q&A (same document, multiple questions)
+- ✅ Code assistants (repeatedly analyzing same files)
+- ✅ System prompt reuse (same instructions for many requests)
+
+**Low Cache Hit Workloads:**
+- ⚠️ Random questions (no shared context)
+- ⚠️ One-shot requests (no follow-ups)
+- ⚠️ Completely unique prompts each time
+
+### Performance Impact
+
+**Without KV-Aware Routing (Round-Robin):**
+```
+Request 1: "Explain AI" → Worker 1 (cache miss, slow TTFT)
+Request 2: "Explain AI in detail" → Worker 2 (cache miss, slow TTFT)
+Request 3: "Explain AI simply" → Worker 3 (cache miss, slow TTFT)
+Average TTFT: 500ms
+```
+
+**With KV-Aware Routing:**
+```
+Request 1: "Explain AI" → Worker 1 (cache miss, slow TTFT: 500ms)
+Request 2: "Explain AI in detail" → Worker 1 (cache hit, fast TTFT: 50ms)
+Request 3: "Explain AI simply" → Worker 1 (cache hit, fast TTFT: 50ms)
+Average TTFT: 200ms (60% improvement!)
+```
 - In K8s-native mode: Routing metadata shared via API or direct communication
 - In NATS mode: NATS shares metadata about cache state
 - Enables intelligent request routing to workers with relevant cached data
@@ -167,13 +230,91 @@ Note: Workers require GPU nodes. Frontends don't require GPUs
 
 ---
 
-## Section 2: Environment Setup
+## Section 2: Deploy NATS for Cache Coordination
 
-### Overview
+### Why NATS is Required
 
-This lab uses **K8s-native deployment** - no NATS or etcd installation required. Dynamo uses Kubernetes EndpointSlices for service discovery and TCP for transport.
+KV-aware routing requires **NATS** (Neural Autonomic Transport System) to coordinate cache state across workers. This is fundamentally different from Lab 1, which used direct worker communication.
 
-**For NATS/etcd deployment** (extreme scale only), see Appendix A after completing this lab.
+**What NATS Does:**
+- Workers publish cache events ("I stored block X", "I removed block Y")
+- Router subscribes to these events to maintain a global cache index
+- Low-latency pub/sub messaging (< 1ms typically)
+- Handles thousands of events per second
+
+**Without NATS**: Router has no visibility into worker cache state → random routing → poor cache hit rates
+
+### Step 1: Add NATS Helm Repository
+
+```bash
+# Add NATS Helm repository
+echo "Adding NATS Helm repository..."
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+helm repo update
+
+echo "✓ NATS repository added"
+```
+
+### Step 2: Install NATS with JetStream
+
+JetStream provides persistent event storage, allowing routers to recover cache state after restarts.
+
+```bash
+# Create namespace for NATS
+kubectl create namespace nats-system --dry-run=client -o yaml | kubectl apply -f -
+
+# Install NATS with JetStream enabled
+echo "Installing NATS with JetStream..."
+helm upgrade --install nats nats/nats \
+  --namespace nats-system \
+  --set nats.jetstream.enabled=true \
+  --set nats.jetstream.memStorage.enabled=true \
+  --set nats.jetstream.memStorage.size=1Gi \
+  --set nats.jetstream.fileStorage.enabled=true \
+  --set nats.jetstream.fileStorage.size=2Gi \
+  --wait
+
+echo "✓ NATS installed successfully"
+echo "  Connection: nats://nats.nats-system:4222"
+echo "  JetStream: Enabled (1Gi memory + 2Gi disk)"
+```
+
+**What this enables:**
+- Cache event streaming from workers
+- Persistent event storage (survives pod restarts)
+- Router state recovery after crashes
+
+### Step 3: Verify NATS Deployment
+
+```bash
+# Check NATS pods
+echo "Checking NATS deployment..."
+kubectl get pods -n nats-system
+
+echo ""
+echo "Checking NATS service..."
+kubectl get svc -n nats-system
+
+echo ""
+echo "Expected output:"
+echo "  - Pod: nats-0 (1/1 Running)"
+echo "  - Service: nats (ClusterIP, port 4222)"
+```
+
+### Step 4: Test NATS Connectivity (Optional)
+
+```bash
+# Quick connectivity test
+kubectl run -it --rm nats-test --image=natsio/nats-box:latest --restart=Never -- \
+  nats-sub -s nats://nats.nats-system:4222 test
+
+# If successful, you'll see "Subscribing on test"
+# Press Ctrl+C to exit
+```
+
+---
+
+## Section 3: Environment Setup
 
 ### Step 1: Set Environment Variables
 
@@ -187,13 +328,14 @@ export CACHE_PATH=${CACHE_PATH:-/data/huggingface-cache}
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🌲 Lab 3: Distributed Dynamo Configuration"
+echo "🌲 Lab 3: KV-Aware Routing Configuration"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Release Version:  $RELEASE_VERSION"
 echo "  Namespace:        $NAMESPACE"
 echo "  Node IP:          $NODE_IP"
+echo "  NATS:             nats://nats.nats-system:4222"
 echo ""
-echo "✓ Environment configured for distributed Dynamo setup"
+echo "✓ Environment configured for KV-aware routing"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ```
 
@@ -201,7 +343,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 ## Pre-Deployment: Check GPU Availability
 
-**⚠️ CRITICAL**: Lab 3 requires GPUs for distributed workers. Before proceeding, verify you have sufficient GPU resources available.
+**⚠️ CRITICAL**: Lab 3 requires GPUs for data-parallel workers. Before proceeding, verify you have sufficient GPU resources available.
 
 ### Step 1: Check Current GPU Usage
 
@@ -227,7 +369,7 @@ kubectl get pods -A -o json | jq -r '.items | group_by(.metadata.namespace) | .[
 **⚠️ WARNING**: If Lab 1 deployment is still running, you MUST delete it first to free GPUs for Lab 3.
 
 Lab 3 deployment requires:
-- **2 GPUs** for 2 distributed workers (1 GPU each)
+- **2 GPUs** for 2 data-parallel workers (1 GPU each)
 
 If you have only 2 GPUs total and Lab 1 is using them, run this cleanup:
 
