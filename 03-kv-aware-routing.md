@@ -629,46 +629,6 @@ fi
 
 ---
 
-## Section 6: Cleanup
-
-### Step 1: Remove KV-Aware Routing Deployment
-
-```bash
-# Delete the KV-aware routing deployment
-echo "Removing KV-aware routing deployment..."
-export NAMESPACE=${NAMESPACE:-dynamo}
-
-kubectl delete dynamographdeployment vllm-kv-demo -n $NAMESPACE
-kubectl delete svc vllm-kv-frontend-np -n $NAMESPACE
-
-echo "✓ KV-aware routing deployment removed"
-```
-
-### Step 2: Verify Lab 1 Deployment is Still Running
-
-Your original Lab 1 deployment should still be running on port 30100:
-
-```bash
-# Check Lab 1 deployment status
-export NAMESPACE=${NAMESPACE:-dynamo}
-export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-echo "Checking Lab 1 deployment..."
-kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE
-
-echo ""
-echo "Lab 1 pods:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-disagg-router
-
-echo ""
-echo "✓ Lab 1 deployment is available at: http://$NODE_IP:30100"
-echo ""
-echo "Test it:"
-echo "  curl http://$NODE_IP:30100/v1/models"
-```
-
----
-
 ## Summary
 
 You've deployed KV-aware routing with data-parallel workers, where the router intelligently directs requests to workers based on their cached data.
@@ -684,7 +644,7 @@ You've deployed KV-aware routing with data-parallel workers, where the router in
 - Use **disaggregated serving** (Lab 1) for predictable latency on individual requests
 - Use **distributed serving** (Lab 3) when you have high traffic with cache-friendly patterns
 
-**Next steps:** Experiment with different worker counts, monitor cache hit rates in Grafana, or explore the optional NATS/etcd setup in Appendix B for extreme-scale deployments.
+**Next steps:** Experiment with different worker counts, monitor cache hit rates in Grafana, or explore the optional NATS/etcd setup in Appendix B/C for extreme-scale deployments.
 
 ---
 
@@ -768,13 +728,53 @@ kubectl get svc vllm-kv-frontend-np -n $NAMESPACE
 - Repeated queries with shared prefixes
 - Workload that generates cache hits
 
-**For NATS/etcd troubleshooting**, see Appendix B
+**For NATS/etcd troubleshooting**, see Appendix C
 
 ---
 
-## Appendix A: NATS/etcd Architecture (Optional - Extreme Scale)
+## Appendix A: Cleanup
 
-This appendix covers the NATS/etcd deployment architecture for extreme scale deployments or multi-region setups. **Most users should use K8s-native deployment** (covered in the main lab).
+### Step 1: Remove KV-Aware Routing Deployment
+
+```bash
+# Delete the KV-aware routing deployment
+echo "Removing KV-aware routing deployment..."
+export NAMESPACE=${NAMESPACE:-dynamo}
+
+kubectl delete dynamographdeployment vllm-kv-demo -n $NAMESPACE
+kubectl delete svc vllm-kv-frontend-np -n $NAMESPACE
+
+echo "✓ KV-aware routing deployment removed"
+```
+
+### Step 2: Verify Lab 1 Deployment is Still Running
+
+Your original Lab 1 deployment should still be running on port 30100:
+
+```bash
+# Check Lab 1 deployment status
+export NAMESPACE=${NAMESPACE:-dynamo}
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+echo "Checking Lab 1 deployment..."
+kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE
+
+echo ""
+echo "Lab 1 pods:"
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-disagg-router
+
+echo ""
+echo "✓ Lab 1 deployment is available at: http://$NODE_IP:30100"
+echo ""
+echo "Test it:"
+echo "  curl http://$NODE_IP:30100/v1/models"
+```
+
+---
+
+## Appendix B: NATS/etcd Architecture (Optional - Extreme Scale)
+
+This appendix covers the NATS/etcd deployment architecture for extreme scale deployments or multi-region setups.
 
 ### When You Need NATS/etcd
 
@@ -862,7 +862,7 @@ If you need to deploy NATS/etcd, refer to Section 2a in the main lab (marked as 
 
 ---
 
-## Appendix B: NATS/etcd Deployment Steps (Optional)
+## Appendix C: NATS/etcd Deployment Steps (Optional)
 
 **⚠️ WARNING:** These steps are ONLY for users deploying NATS/etcd for extreme-scale scenarios. Most users should skip this appendix and use K8s-native deployment (covered in the main lab).
 
