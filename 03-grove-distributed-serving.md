@@ -18,32 +18,46 @@ jupyter:
 
 In this lab, you'll learn about **KV-aware routing**, an intelligent load balancing feature that routes requests to workers based on their cached data. Unlike simple round-robin routing, KV-aware routing tracks which workers have already processed similar prompts and directs new requests to workers with matching cached blocks. This dramatically reduces the time to first token (TTFT) for repeated or similar queries.
 
-**The Setup:**
-You'll deploy 2 identical workers (data parallelism) where each worker can handle complete inference requests independently. Instead of random load balancing, you'll use a **KV-aware router** that:
-- Tracks which KV cache blocks each worker has stored
-- Routes requests with similar prefixes to workers that already have those blocks cached
-- Avoids redundant computation by reusing cached prompt processing
+**The Architecture:**
+- **2 Independent Workers** (GPUs 0-1): Each handles full inference (prefill + decode)
+- **KV-Aware Router**: Tracks which worker has cached which prompt prefixes
+- **NATS Message Bus**: Coordinates cache state across workers
+- Each worker stores its own local KV cache and publishes cache events to NATS
 
-**Key Component: NATS Message Bus**
-KV-aware routing requires NATS (a messaging system) to coordinate cache state across workers. Workers publish "cache events" (block created, block removed) to NATS, and the router subscribes to these events to maintain a global view of what's cached where. This is fundamentally different from Lab 1's architecture.
+**How KV-Aware Routing Works:**
+1. Request with prompt "Explain quantum computing" arrives
+2. Router checks: No worker has this cached → sends to Worker 1
+3. Worker 1 processes request and caches the prefill computation
+4. Worker 1 publishes cache event to NATS: "I have blocks for 'Explain quantum computing'"
+5. Router updates its tracking: Worker 1 has those cached blocks
+6. Next request: "Explain quantum computing in simple terms" arrives
+7. Router sees: Worker 1 has cached blocks for "Explain quantum computing" → sends to Worker 1
+8. Worker 1 reuses cached prefill blocks → much faster TTFT!
+
+**Why This Matters:**
+When users ask variations of similar questions, the router intelligently directs requests to workers that have already cached related computations. This avoids redundant prefill work and can reduce TTFT by 50% or more for cache-friendly workloads.
 
 **How this differs from Lab 1:**
-- **Lab 1**: Disaggregated serving with specialized workers (prefill → decode pipeline)
-- **Lab 3**: Data parallel workers with intelligent cache-aware routing
-- **Lab 1**: Workers cooperate on each request (tightly coupled)
-- **Lab 3**: Workers operate independently, router optimizes placement
-- **Lab 1**: No message bus needed (direct worker communication)
-- **Lab 3**: NATS required for cache coordination
+- **Lab 1**: Disaggregated serving (specialized prefill → decode workers)
+- **Lab 3**: Data-parallel serving (2 generalist workers, each does everything)
+- **Lab 1**: Workers cooperate on each request (tightly coupled pipeline)
+- **Lab 3**: Workers operate independently, router makes intelligent placement decisions
+- **Lab 1**: NIXL for prefill→decode KV cache transfer
+- **Lab 3**: Local KV cache per worker, NATS for cache event coordination
+- **Lab 1**: No NATS needed (direct worker communication via NIXL)
+- **Lab 3**: NATS required for router to track cache state across workers
 
 **When to use KV-aware routing:**
 - Chatbots with conversation history (similar context across turns)
 - Document Q&A systems (multiple questions about the same document)
-- Code completion (repeatedly analyzing the same codebase)
-- Any workload with shared prompt prefixes
+- Batch processing with shared system prompts
+- Any workload where prompt prefixes are repeated across requests
 
 **Prerequisites**: Complete Lab 1 (Dynamo Deployment) and Lab 2 (Monitoring)
 
 **Duration**: ~60 minutes
+
+**Note**: Requires 2 GPUs. If Lab 1 is still running, you'll need to clean it up first.
 
 ---
 
@@ -76,7 +90,7 @@ KV-Aware Router ←──── NATS (KV Events) ←──── Workers publish
       ↓
    Selects best worker
       ↓
-Worker 1, 2, or 3 (Data Parallel - all identical)
+Worker 1 or Worker 2 (Data Parallel - identical)
       ↓
 Response to Client
 ```
@@ -126,23 +140,23 @@ worker1.process_request()
 
 **Architecture:**
 ```
-┌──────────┐  ┌──────────┐  ┌──────────┐
-│ Worker 1 │  │ Worker 2 │  │ Worker 3 │
-└────┬─────┘  └────┬─────┘  └────┬─────┘
-     │             │             │
-     └─────────────┼─────────────┘
-                   │ Publish cache events
-                   ↓
-          ┌────────────────┐
-          │  NATS Server   │
-          │  (Message Bus) │
-          └────────┬───────┘
-                   │ Subscribe to events
-                   ↓
-          ┌────────────────┐
-          │  KV Router     │
-          │ (Global Index) │
-          └────────────────┘
+┌──────────┐  ┌──────────┐
+│ Worker 1 │  │ Worker 2 │
+└────┬─────┘  └────┬─────┘
+     │             │
+     └─────────────┘
+            │ Publish cache events
+            ↓
+   ┌────────────────┐
+   │  NATS Server   │
+   │  (Message Bus) │
+   └────────┬───────┘
+            │ Subscribe to events
+            ↓
+   ┌────────────────┐
+   │  KV Router     │
+   │ (Global Index) │
+   └────────────────┘
 ```
 
 ### Data Parallelism vs Disaggregated Serving
@@ -154,7 +168,7 @@ worker1.process_request()
 - 1 request = 1 prefill worker + 1 decode worker
 
 **Lab 3 (Data Parallel with KV-Aware Routing):**
-- Worker 1, Worker 2, Worker 3 (all identical)
+- Worker 1, Worker 2 (both identical)
 - Workers are independent (same role)
 - Loose coupling (work in parallel)
 - 1 request = 1 worker (router chooses which)
