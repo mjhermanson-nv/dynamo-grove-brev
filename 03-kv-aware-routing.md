@@ -721,11 +721,11 @@ Send many concurrent requests or very long sequences to saturate one worker. Und
 
 This proves KV-aware routing is working! The router intelligently tracks which worker has which prefixes cached and directs requests accordingly, maximizing cache reuse and GPU efficiency.
 
-### Optional: Experiment with Load Testing
+### Step 3: Load Testing to Observe Multi-Worker Distribution
 
 ⚠️ **IMPORTANT: Run these commands in a TERMINAL (not in the notebook). AI-Perf can be resource-intensive.**
 
-After completing Step 2 and confirming routing is working, you can experiment with load testing to see multi-worker distribution under concurrent load.
+Run concurrent requests to see how the router distributes load across both workers when demand increases.
 
 #### Prerequisites
 
