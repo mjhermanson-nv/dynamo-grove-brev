@@ -190,12 +190,12 @@ echo "  - Service: nats (ClusterIP, port 4222)"
 ### Step 4: Test NATS Connectivity (Optional)
 
 ```bash
-# Quick connectivity test
-kubectl run -it --rm nats-test --image=natsio/nats-box:latest --restart=Never -- \
-  nats sub -s nats://nats.nats-system:4222 test
+# Quick connectivity test (publishes a test message)
+kubectl run --rm nats-test --image=natsio/nats-box:latest --restart=Never -- \
+  nats pub -s nats://nats.nats-system:4222 test "Hello from NATS test"
 
-# If successful, you'll see "Listening on [test]"
-# Press Ctrl+C to exit
+# If successful, you'll see "Published [test] : 'Hello from NATS test'"
+echo "✓ NATS is reachable and accepting connections"
 ```
 
 ---
