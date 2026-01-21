@@ -125,8 +125,6 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 
 - **Start with Guide 1**: Sets up the foundation for all subsequent guides
 - **Run benchmarks in terminals**: Use `resources/run-benchmark.sh` to avoid crashing notebook kernels
-- **Use markdown for editing**: Better version control and easier collaboration
-- **Reload notebooks after sync**: Ensure you're running the latest version
 - **Check logs with kubectl**: Essential for troubleshooting deployment issues
 - **Monitor resource usage**: Keep an eye on GPU memory and CPU utilization
 
