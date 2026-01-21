@@ -419,7 +419,7 @@ EOF
 
 echo ""
 echo "✓ NodePort service created on port 30200"
-echo "  Access at: http://\${NODE_IP}:30200"
+echo "  Access at: http://$NODE_IP:30200"
 ```
 
 ### Step 3: Wait for Deployment
