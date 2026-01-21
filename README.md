@@ -128,10 +128,6 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 - **Check logs with kubectl**: Essential for troubleshooting deployment issues
 - **Monitor resource usage**: Keep an eye on GPU memory and CPU utilization
 
-## 📄 License
-
-These guides are provided as-is for learning and deploying Dynamo on Kubernetes.
-
 ---
 
 **Happy learning! 🚀**
