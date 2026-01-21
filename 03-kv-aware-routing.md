@@ -295,24 +295,7 @@ echo "If ALLOCATABLE shows 0, pods are still terminating - wait 30 seconds and r
 
 ## Section 4: Deploy Data-Parallel Workers with KV-Aware Routing
 
-### Understanding the Deployment
-
-We'll deploy 2 identical workers (data parallelism) with a KV-aware router that tracks cache state via NATS.
-
-**Configuration:**
-- **Frontend**: 1 replica with `--router-mode kv` (enables cache-aware routing)
-- **Workers**: 2 replicas, each with 1 GPU, publishing cache events to NATS
-- **Architecture**: Data parallel (not disaggregated - no prefill/decode split)
-- **Cache Coordination**: NATS (workers publish events, router subscribes)
-
-**Key Differences from Lab 1:**
-
-| Aspect | Lab 1 (Disaggregated) | Lab 3 (Data Parallel + KV-Aware) |
-|--------|----------------------|-----------------------------------|
-| Workers | Prefill + Decode (specialized) | Worker 1 + Worker 2 (identical) |
-| Routing | Disaggregated router (prefill→decode) | KV-aware router (cache-based) |
-| Message Bus | Not needed | NATS (required) |
-| Worker Config | Different roles | Same role, different instances |
+Now let's deploy 2 identical workers with a KV-aware router that uses NATS for cache coordination.
 
 ### Step 1: Create Data-Parallel Deployment with KV-Aware Routing
 
