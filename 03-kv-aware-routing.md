@@ -745,10 +745,10 @@ curl -s http://$NODE_IP:30200/health || echo "Service not ready yet"
 
 **Install AI-Perf** (if not already installed):
 ```bash
-pip install aiperf
+pip install -q aiperf
 ```
 
-**Run benchmarks in a terminal:**
+**Run benchmarks in a terminal (copy and paste these commands):**
 
 ```bash
 # Set up endpoint
