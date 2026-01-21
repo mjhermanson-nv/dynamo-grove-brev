@@ -133,17 +133,7 @@ Traditional load balancers distribute requests randomly or in round-robin fashio
 
 ## Section 2: Deploy NATS for Cache Coordination
 
-### Why NATS is Required
-
-KV-aware routing requires **NATS** (Neural Autonomic Transport System) to coordinate cache state across workers. This is fundamentally different from Lab 1, which used direct worker communication.
-
-**What NATS Does:**
-- Workers publish cache events ("I stored block X", "I removed block Y")
-- Router subscribes to these events to maintain a global cache index
-- Low-latency pub/sub messaging (< 1ms typically)
-- Handles thousands of events per second
-
-**Without NATS**: Router has no visibility into worker cache state → random routing → poor cache hit rates
+Now that you understand how KV-aware routing works, let's deploy NATS to enable cache coordination between workers and the router.
 
 ### Step 1: Add NATS Helm Repository
 
