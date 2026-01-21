@@ -114,30 +114,6 @@ Traditional load balancers distribute requests randomly or in round-robin fashio
 - ⚠️ Single worker deployments (no routing decisions to make)
 - ⚠️ Very short contexts (cache overhead exceeds benefit)
 
-### Performance Impact
-
-**Without KV-Aware Routing (Round-Robin):**
-```
-Request 1: "Explain AI" → Worker 1 (cache miss)
-Request 2: "Explain AI in detail" → Worker 2 (cache miss)
-Request 3: "Explain AI simply" → Worker 1 (cache miss)
-All requests experience full prefill computation
-```
-
-**With KV-Aware Routing:**
-```
-Request 1: "Explain AI" → Worker 1 (cache miss)
-Request 2: "Explain AI in detail" → Worker 1 (cache hit - same worker)
-Request 3: "Explain AI simply" → Worker 1 (cache hit - same worker)
-Requests 2-3 reuse cached prefill computation from Request 1
-```
-
-**How NATS Enables This:**
-- Workers publish cache events to NATS when blocks are created/removed
-- Router subscribes to these events and maintains a global cache index
-- Router uses this index to select workers with matching cached prefixes
-- Result: Reduced prefill latency when cache hits occur
-
 ### Understanding Multi-GPU/Multi-Node Benefits
 
 **In this lab (single node, 2 GPUs):**
