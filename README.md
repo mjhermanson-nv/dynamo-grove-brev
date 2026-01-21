@@ -21,7 +21,7 @@ Add monitoring to your Dynamo deployment using the cluster's built-in Prometheus
 **Duration**: ~20 minutes
 
 ### 03 - KV-Aware Routing
-**File**: `03-grove-distributed-serving.ipynb`
+**File**: `03-kv-aware-routing.ipynb`
 
 Learn **KV-aware routing**, an intelligent load balancing feature that tracks which workers have cached data and routes requests accordingly. Deploy 2 identical workers (data parallelism) where the router monitors cache state via NATS and directs requests with similar prefixes to workers with matching cached blocks. This dramatically reduces time-to-first-token for chatbots, document Q&A, and any workload with repeated prompt patterns. Deploy NATS for cache coordination, configure the frontend with `--router-mode kv`, and demonstrate 5-10x faster responses for cache hits.
 
@@ -59,7 +59,7 @@ cd resources
 dynamo-grove-brev/
 ├── 01-dynamo-deployment-guide.md/.ipynb      # Guide 1: Deployment
 ├── 02-monitoring-and-observability.md/.ipynb # Guide 2: Monitoring
-├── 03-grove-distributed-serving.md/.ipynb    # Guide 3: Grove
+├── 03-kv-aware-routing.md/.ipynb             # Guide 3: KV-Aware Routing
 ├── oneshot.sh                                # Bootstrap script
 ├── resources/                                # Supporting files
 │   ├── run-benchmark.sh                      # AI-Perf benchmark wrapper

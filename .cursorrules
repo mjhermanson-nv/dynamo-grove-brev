@@ -9,7 +9,7 @@ Contains Jupyter notebooks (`.ipynb`) paired with markdown files (`.md`) for ver
 ### Notebook Structure
 - **Lab 1**: `01-dynamo-deployment-guide.{md,ipynb}` - Basic Dynamo deployment on Kubernetes
 - **Lab 2**: `02-monitoring-and-observability.{md,ipynb}` - Grafana/Prometheus monitoring
-- **Lab 3**: `03-grove-distributed-serving.{md,ipynb}` - Distributed serving with Grove
+- **Lab 3**: `03-kv-aware-routing.{md,ipynb}` - KV-aware routing with data-parallel workers
 - **Resources**: `resources/` - Helper scripts, dashboards, benchmark configs
 - **Artifacts**: `artifacts/` - Benchmark results, logs (gitignored)
 
