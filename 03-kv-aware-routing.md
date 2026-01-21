@@ -424,7 +424,7 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1 --enable-prefix-caching
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1 --enable-prefix-caching --enable-local-indexer true
 EOF
 
 echo ""
