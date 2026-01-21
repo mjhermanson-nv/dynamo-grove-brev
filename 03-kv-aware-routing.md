@@ -581,99 +581,139 @@ With Qwen 1.5B (small, fast model) and short prompts (~3-4 tokens shared prefix)
 
 For this workshop with 2 GPUs and a 1.5B model, KV-aware routing is **working correctly** (NATS connected, router in KV mode, cache enabled), but timing improvements are too small to measure with `curl`.
 
-### Step 2: Check Cache Behavior
+### Step 2: Visualize KV-Aware Routing in Action
 
-**Note**: vLLM's detailed cache logs (hit/miss rates) are only visible at DEBUG level, which is very verbose. At INFO level, you'll see NATS connection and endpoint registration, but not individual cache hits.
-
-**Option A: Check NATS Events (Recommended)**
+This script monitors the frontend's routing decisions in real-time, showing which worker handles each request and how many cached blocks are reused.
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
-
-# Check NATS for KV cache events being published
-echo "Checking NATS for KV cache event stream..."
-kubectl exec -n nats-system nats-0 -- nats stream ls 2>/dev/null || \
-    echo "Note: JetStream streams are created on first request"
-
-echo ""
-echo "After sending requests above, workers publish KV events to NATS"
-echo "The router uses these events to route requests to workers with cached prefixes"
-```
-
-**Option B: Enable Verbose Logging (Optional - Very Verbose)**
-
-If you want to see detailed cache hit/miss logs, you can patch the deployment:
-
-```bash
-export NAMESPACE=${NAMESPACE:-dynamo}
-
-# This will make logs VERY verbose - only use for debugging
-kubectl set env deployment/vllm-kv-demo-vllmworker \
-  -n $NAMESPACE \
-  VLLM_LOGGING_LEVEL=DEBUG
-
-echo "⚠️ Verbose logging enabled - logs will be very detailed"
-echo "To revert: kubectl set env deployment/vllm-kv-demo-vllmworker -n $NAMESPACE VLLM_LOGGING_LEVEL=INFO"
-```
-
-**What indicates KV-aware routing is working:**
-- NATS connection successful (shown in startup logs)
-- Requests with similar prefixes complete faster (TTFT improvement)
-- Worker logs show `Registering endpoint` messages (NATS connectivity)
-- At DEBUG level: "GPU KV cache usage" and block allocation messages
-
-### Step 3: Demonstrate System Prompt Caching (Best Use Case)
-
-System prompts are where KV-aware routing provides the most value, since they're:
-- Longer (20-50+ tokens vs 3-4 for short queries)
-- Identical across many requests (same prefix every time)
-- Frequently reused in multi-turn conversations
-
-```bash
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
-echo "Testing KV-aware routing with shared system prompt..."
+# Get pod names
+FRONTEND=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend -o jsonpath='{.items[0].metadata.name}')
+WORKER1=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker -o jsonpath='{.items[0].metadata.name}')
+WORKER2=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker -o jsonpath='{.items[1].metadata.name}')
+
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║         KV-Aware Routing Visualization                        ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Frontend: $FRONTEND"
+echo "Worker 1: $WORKER1"
+echo "Worker 2: $WORKER2"
 echo ""
 
-# Turn 1
-echo "Turn 1: Initial request (system prompt cached)"
+# Start monitoring frontend routing decisions
+kubectl logs -n $NAMESPACE $FRONTEND -f 2>/dev/null | \
+  grep "Selected worker" --line-buffered | \
+  awk '{print "[ROUTING] Worker:", $(NF-7), "| Cached blocks:", $(NF-5)}' &
+MONITOR_PID=$!
+
+sleep 2
+
+echo "════════════════════════════════════════════════════════════════"
+echo "Sending Test Requests"
+echo "════════════════════════════════════════════════════════════════"
+echo ""
+
+# Request 1 - Physics prefix
+echo "📤 Request 1: Physics tutor + 'What is gravity?'"
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
     "messages": [
-      {"role": "system", "content": "You are a helpful AI assistant specialized in physics. Always explain concepts clearly and concisely."},
-      {"role": "user", "content": "What is quantum mechanics?"}
+      {"role": "system", "content": "You are a physics tutor."},
+      {"role": "user", "content": "What is gravity?"}
     ],
-    "max_tokens": 60
-  }' | jq -r '.choices[0].message.content'
+    "max_tokens": 30
+  }' | jq -r '.choices[0].message.content | .[0:70]' 
 
+sleep 3
+
+# Request 2 - Same physics prefix
 echo ""
-sleep 1
-
-# Turn 2 - Same system prompt, different question
-echo "Turn 2: New question with same system prompt (router directs to same worker)"
+echo "📤 Request 2: Physics tutor + 'What is velocity?' (SAME PREFIX)"
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
     "messages": [
-      {"role": "system", "content": "You are a helpful AI assistant specialized in physics. Always explain concepts clearly and concisely."},
-      {"role": "user", "content": "What is relativity?"}
+      {"role": "system", "content": "You are a physics tutor."},
+      {"role": "user", "content": "What is velocity?"}
     ],
-    "max_tokens": 60
-  }' | jq -r '.choices[0].message.content'
+    "max_tokens": 30
+  }' | jq -r '.choices[0].message.content | .[0:70]'
+
+sleep 3
+
+# Request 3 - Different prefix
+echo ""
+echo "📤 Request 3: Math tutor + 'What is algebra?' (DIFFERENT PREFIX)"
+curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [
+      {"role": "system", "content": "You are a math tutor."},
+      {"role": "user", "content": "What is algebra?"}
+    ],
+    "max_tokens": 30
+  }' | jq -r '.choices[0].message.content | .[0:70]'
+
+sleep 3
+
+# Request 4 - Back to physics
+echo ""
+echo "📤 Request 4: Physics tutor + 'Explain momentum' (BACK TO PHYSICS)"
+curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [
+      {"role": "system", "content": "You are a physics tutor."},
+      {"role": "user", "content": "Explain momentum"}
+    ],
+    "max_tokens": 30
+  }' | jq -r '.choices[0].message.content | .[0:70]'
+
+sleep 2
+kill $MONITOR_PID 2>/dev/null
 
 echo ""
-echo "✓ Both requests used the same system prompt"
-echo "  System prompt: ~25 tokens (processed once, reused on second request)"
-echo "  Router directed second request to worker with cached system prompt"
-echo ""
-echo "Note: With Qwen 1.5B, timing improvements are still too small to measure,"
-echo "but the caching mechanism is working (verified via NATS connection above)"
+echo "════════════════════════════════════════════════════════════════"
+echo "✓ Check the [ROUTING] lines above:"
+echo "  - Requests 1, 2, and 4 (physics) should use the same Worker ID"
+echo "  - Request 3 (math) may use a different Worker ID"
+echo "  - 'Cached blocks' shows prefix reuse (higher = more cache hits)"
+echo "════════════════════════════════════════════════════════════════"
 ```
 
-### Step 4: Verify Deployment Status
+**Understanding the Output:**
+
+Look for these key indicators in the `[ROUTING]` lines:
+
+1. **worker_id** - Unique identifier for each worker pod
+   - Same worker_id = request routed to same GPU
+   - Different worker_id = request routed to different GPU
+
+2. **cached blocks** - Number of KV cache blocks reused (**THE KEY METRIC!**)
+   - `cached blocks: 0` = No cache hit (cold start or different prefix)
+   - `cached blocks: N` (N > 0) = Cache hit! Router reused N blocks from memory
+
+3. **Routing pattern** - Requests with the same system prompt should route to the same worker
+
+**Example of successful KV-aware routing:**
+```
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 0     ← First "physics" request
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Second "physics" request (CACHE HIT!)
+[ROUTING] Worker: 14409932740882684000 | Cached blocks: 0    ← "Math" request (different worker)
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Back to "physics" (same worker, cache hit!)
+```
+
+The router intelligently directs physics requests to worker `257590...` and math requests to worker `144099...`, maximizing cache reuse!
+
+### Step 3: Verify Deployment Status
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
