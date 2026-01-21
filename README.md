@@ -20,13 +20,13 @@ Add monitoring to your Dynamo deployment using the cluster's built-in Prometheus
 
 **Duration**: ~20 minutes
 
-### 03 - Distributed Serving with Grove
+### 03 - KV-Aware Routing
 **File**: `03-grove-distributed-serving.ipynb`
 
-Deploy a **distributed serving** architecture where multiple identical workers collaborate to serve requests. Unlike Lab 1's specialized workers, these workers can each handle complete requests and share cached computations (KV cache) over the network using NIXL. This enables horizontal scaling and improved performance for workloads with repeated or similar queries. You'll deploy 2 workers that automatically discover each other through Kubernetes and learn when to use distributed vs disaggregated architectures.
+Learn **KV-aware routing**, an intelligent load balancing feature that tracks which workers have cached data and routes requests accordingly. Deploy 2 identical workers (data parallelism) where the router monitors cache state via NATS and directs requests with similar prefixes to workers with matching cached blocks. This dramatically reduces time-to-first-token for chatbots, document Q&A, and any workload with repeated prompt patterns. Deploy NATS for cache coordination, configure the frontend with `--router-mode kv`, and demonstrate 5-10x faster responses for cache hits.
 
-**Duration**: ~45 minutes  
-**Note**: Uses K8s-native discovery (v0.8.0). Optional NATS/etcd setup for extreme scale included in appendices.
+**Duration**: ~60 minutes  
+**Note**: Requires NATS deployment for cache event coordination. Different from Lab 1's disaggregated architecture.
 
 ## 🚀 Quick Start
 
