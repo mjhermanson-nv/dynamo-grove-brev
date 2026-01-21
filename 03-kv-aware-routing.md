@@ -725,30 +725,37 @@ This proves KV-aware routing is working! The router intelligently tracks which w
 
 ### Optional: Experiment with Load Testing
 
-**⚠️ IMPORTANT: Run these commands in a TERMINAL (not in the notebook). AI-Perf can be resource-intensive.**
+⚠️ **IMPORTANT: Run these commands in a TERMINAL (not in the notebook). AI-Perf can be resource-intensive.**
 
 After completing Step 2 and confirming routing is working, you can experiment with load testing to see multi-worker distribution under concurrent load.
 
-**Prerequisites:**
+#### Prerequisites
 
 1. Make sure your Lab 3 deployment is running:
+
 ```bash
 kubectl get pods -n dynamo -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
 # All pods should be Running (1/1)
 ```
 
 2. Verify the NodePort service is accessible:
+
 ```bash
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 curl -s http://$NODE_IP:30200/health || echo "Service not ready yet"
 ```
 
-**Install AI-Perf** (if not already installed):
+#### Install AI-Perf
+
+If not already installed:
+
 ```bash
 pip install -q aiperf
 ```
 
-**Run benchmarks in a terminal (copy and paste these commands):**
+#### Run Benchmarks in a Terminal
+
+Copy and paste these commands:
 
 ```bash
 # Set up endpoint
@@ -784,12 +791,14 @@ aiperf profile \
   --request-count 200
 ```
 
-**What to observe:**
+#### What to Observe
+
 - TTFT (Time To First Token) - lower is better
 - Request throughput - higher concurrency should utilize both workers
 - At high concurrency, check frontend logs to see requests distributed across both workers
 
-**Troubleshooting:**
+#### Troubleshooting
+
 - **Connection refused error**: Ensure Lab 3 deployment is running and service is created (Section 4 Step 2)
 - **Timeout errors**: Model may still be loading, wait 30 seconds and retry
 - **High error rate**: Check pod logs for issues: `kubectl logs -n dynamo -l nvidia.com/dynamo-component=Frontend`
