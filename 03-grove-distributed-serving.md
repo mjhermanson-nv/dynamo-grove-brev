@@ -605,83 +605,130 @@ echo "  Workers: Publishing cache events to NATS"
 
 ## Section 5: Demonstrate Cache-Aware Routing
 
-### Step 1: Access Dynamo Metrics in Grafana
+Now we'll demonstrate KV-aware routing by sending requests with shared prefixes. The router should direct these to the same worker for cache reuse.
 
-Monitor your distributed Dynamo deployment using Grafana:
-
-```bash
-# Get Grafana URL
-BREV_ID=$(hostname | cut -d'-' -f2)
-GRAFANA_URL="https://grafana0-${BREV_ID}.brevlab.com/"
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📊 Distributed Dynamo Monitoring"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Grafana URL: $GRAFANA_URL"
-echo ""
-echo "  Dashboard: Dynamo Inference Metrics"
-echo "    • Request rates across multiple workers"
-echo "    • Time to First Token (TTFT) distribution"
-echo "    • Inter-Token Latency (ITL) per worker"
-echo "    • Worker utilization and queue depths"
-echo ""
-echo "🔗 Open Grafana and search for 'Dynamo Inference'"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-```
-
-### Step 2: Test Distributed Dynamo with Traffic
-
-Generate meaningful traffic to see distributed coordination in action:
+### Step 1: Send Requests with Shared Prefix
 
 ```bash
-# Generate test traffic with concurrent requests
-echo "Generating traffic to distributed Dynamo deployment..."
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
-# Function to send a request
-send_request() {
-    local id=$1
-    curl -s http://$NODE_IP:30200/v1/chat/completions \
-      -H "Content-Type: application/json" \
-      -d "{
-        \"model\": \"Qwen/Qwen2.5-1.5B-Instruct\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Explain distributed systems in 2 sentences. Request $id\"}],
-        \"stream\": false,
-        \"max_tokens\": 100
-      }" > /dev/null 2>&1
-}
-
-# Send 30 requests with 3 concurrent workers
-echo "Sending 30 requests with 3 concurrent connections..."
-echo "This will generate metrics for:"
-echo "  - Request throughput across multiple workers"
-echo "  - Worker utilization and load balancing"
-echo "  - KV cache effectiveness and NIXL transfers"
+echo "Demonstrating KV-aware routing with shared prefix..."
+echo "All requests start with 'Explain quantum computing'"
 echo ""
 
-for i in {1..10}; do
-    send_request $((i*3-2)) &
-    send_request $((i*3-1)) &
-    send_request $((i*3)) &
-    wait
-    echo "Batch $i/10 complete (requests $((i*3-2))-$((i*3)))"
-    sleep 0.5
+# Request 1: Baseline (cache miss expected)
+echo "Request 1: Full explanation (cache miss expected)"
+time curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Explain quantum computing"}],
+    "max_tokens": 50
+  }' | jq -r '.choices[0].message.content'
+
+echo ""
+sleep 2
+
+# Request 2: Similar prefix (cache hit expected)
+echo "Request 2: Simple explanation (cache hit expected - shared prefix)"
+time curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Explain quantum computing in simple terms"}],
+    "max_tokens": 50
+  }' | jq -r '.choices[0].message.content'
+
+echo ""
+sleep 2
+
+# Request 3: Another variation (cache hit expected)
+echo "Request 3: Brief explanation (cache hit expected - shared prefix)"
+time curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [{"role": "user", "content": "Explain quantum computing briefly"}],
+    "max_tokens": 50
+  }' | jq -r '.choices[0].message.content'
+
+echo ""
+echo "✓ Requests completed"
+echo "  Request 1 should be slower (no cache)"
+echo "  Requests 2-3 should be faster (cache hits with KV-aware routing)"
+```
+
+**Expected Behavior:**
+- Request 1: Slower TTFT (Time To First Token) - no cached blocks
+- Requests 2 & 3: Faster TTFT - router directs to worker with cached prefix "Explain quantum computing"
+
+### Step 2: Check Worker Logs for Cache Activity
+
+```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
+# Get worker pod names  
+WORKER_PODS=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[*].metadata.name}')
+
+echo "Checking worker logs for cache events..."
+for POD in $WORKER_PODS; do
+    echo ""
+    echo "=== Worker: $POD ==="
+    kubectl logs -n $NAMESPACE $POD --tail=30 | grep -E "(prefix.*cache|kv.*cache|blocks)" || echo "No cache messages in recent logs"
 done
+```
+
+**What to look for:**
+- "Prefix cache hit" messages
+- Block allocation/reuse statistics
+- Most requests should hit the same worker (indicated by same pod having activity)
+
+### Step 3: Conversation-Style Traffic (System Prompt Reuse)
+
+```bash
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+
+echo "Testing cache reuse with shared system prompt..."
+
+# Turn 1
+echo "Turn 1: Physics question"
+curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [
+      {"role": "system", "content": "You are a helpful AI assistant specialized in physics. Always explain concepts clearly."},
+      {"role": "user", "content": "What is quantum mechanics?"}
+    ],
+    "max_tokens": 80
+  }' | jq -r '.choices[0].message.content'
 
 echo ""
-echo "✓ Sent 30 requests with concurrent load"
+sleep 2
+
+# Turn 2 (shares system prompt - cache hit expected)
+echo "Turn 2: Different question, same system prompt"
+curl -s http://$NODE_IP:30200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "messages": [
+      {"role": "system", "content": "You are a helpful AI assistant specialized in physics. Always explain concepts clearly."},
+      {"role": "user", "content": "What is relativity?"}
+    ],
+    "max_tokens": 80
+  }' | jq -r '.choices[0].message.content'
+
 echo ""
-echo "Check metrics in Grafana:"
-echo "  - Dynamo Inference Dashboard"
-echo "  - Request throughput, TTFT, ITL across workers"
-echo "  - Worker queue depths and GPU utilization"
-echo ""
-echo "View Grafana: https://grafana0-$(hostname | sed 's/^brev-//').brevlab.com/"
+echo "✓ Both requests shared the system prompt"
+echo "  KV-aware router should route to same worker for cache reuse"
+echo "  System prompt tokens (cached): ~20 tokens"
+echo "  Only the user questions needed to be processed fresh"
 ```
 
 ---
 
-## Section 5: Understanding Distributed Dynamo Trade-offs
+## Section 6: Understanding KV-Aware Routing Trade-offs
 
 ### K8s-Native vs NATS/etcd Comparison (v0.8.0+)
 
