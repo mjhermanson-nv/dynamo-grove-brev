@@ -37,16 +37,6 @@ In this lab, you'll learn about **KV-aware routing**, an intelligent load balanc
 **Why This Matters:**
 When users ask variations of similar questions, the router intelligently directs requests to workers that have already cached related computations. This avoids redundant prefill work and reduces time-to-first-token for cache-friendly workloads.
 
-**How this differs from Lab 1:**
-- **Lab 1**: Disaggregated serving (specialized prefill → decode workers)
-- **Lab 3**: Data-parallel serving (2 generalist workers, each does everything)
-- **Lab 1**: Workers cooperate on each request (tightly coupled pipeline)
-- **Lab 3**: Workers operate independently, router makes intelligent placement decisions
-- **Lab 1**: NIXL for prefill→decode KV cache transfer
-- **Lab 3**: Local KV cache per worker, NATS for cache event coordination
-- **Lab 1**: No NATS needed (direct worker communication via NIXL)
-- **Lab 3**: NATS required for router to track cache state across workers
-
 **When to use KV-aware routing:**
 - Chatbots with conversation history (similar context across turns)
 - Document Q&A systems (multiple questions about the same document)
