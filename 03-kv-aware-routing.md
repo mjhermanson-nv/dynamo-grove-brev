@@ -755,9 +755,9 @@ pip install -q aiperf
 
 #### Run Benchmarks in a Terminal
 
-Copy and paste these commands:
+Copy and paste these commands into a terminal (not executable in notebook):
 
-```bash
+```
 # Set up endpoint
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 export FRONTEND_URL="http://$NODE_IP:30200"
