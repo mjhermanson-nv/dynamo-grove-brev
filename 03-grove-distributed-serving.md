@@ -408,50 +408,68 @@ echo "If ALLOCATABLE shows 0, pods are still terminating - wait 30 seconds and r
 
 ---
 
-## Section 3: Deploy Distributed Dynamo Model
+## Section 4: Deploy Data-Parallel Workers with KV-Aware Routing
 
-### Understanding Dynamo's Distributed Architecture
+### Understanding the Deployment
 
-Dynamo (orchestrated by Grove) uses Kubernetes-native service discovery to coordinate distributed components. The deployment works as follows:
+We'll deploy 2 identical workers (data parallelism) with a KV-aware router that tracks cache state via NATS.
 
-**1. Workers register with Kubernetes**: Each worker pod registers itself via K8s services
-**2. Frontend discovers workers**: The frontend uses EndpointSlices to find available workers
-**3. KV-aware Router**: Routes requests intelligently across workers
-**4. NIXL handles KV cache data**: Workers transfer KV cache tensors directly via NIXL (RDMA/TCP)
+**Configuration:**
+- **Frontend**: 1 replica with `--router-mode kv` (enables cache-aware routing)
+- **Workers**: 2 replicas, each with 1 GPU, publishing cache events to NATS
+- **Architecture**: Data parallel (not disaggregated - no prefill/decode split)
+- **Cache Coordination**: NATS (workers publish events, router subscribes)
 
-**Note**: For extreme scale deployments, NATS/etcd can be added for advanced coordination (see Appendix A & B).
+**Key Differences from Lab 1:**
 
-### Step 1: Create Distributed Dynamo Deployment
+| Aspect | Lab 1 (Disaggregated) | Lab 3 (Data Parallel + KV-Aware) |
+|--------|----------------------|-----------------------------------|
+| Workers | Prefill + Decode (specialized) | Worker 1 + Worker 2 (identical) |
+| Routing | Disaggregated router (prefill→decode) | KV-aware router (cache-based) |
+| Message Bus | Not needed | NATS (required) |
+| Worker Config | Different roles | Same role, different instances |
 
-We'll create a deployment with 2 workers to demonstrate distributed architecture and KV-aware routing:
-
-**Configuration Notes:**
-- **Data Parallelism**: `replicas: 2` with `tensor-parallel-size: 1` creates 2 independent workers that share KV cache via NIXL
-- **Not Tensor Parallelism**: Each worker loads the full model on 1 GPU (not splitting 1 model across 2 GPUs)
-- **K8s-Native Discovery**: Workers register via Kubernetes EndpointSlices (v0.8.0+)
+### Step 1: Create Data-Parallel Deployment with KV-Aware Routing
 
 ```bash
-# Create distributed Dynamo deployment
-echo "Creating distributed Dynamo deployment with 2 workers..."
+export RELEASE_VERSION=${RELEASE_VERSION:-0.8.0}
+export NAMESPACE=${NAMESPACE:-dynamo}
 
-cat <<'EOF' | kubectl apply -f -
+# Create deployment with KV-aware routing
+echo "Creating data-parallel deployment with KV-aware routing..."
+
+cat <<EOF | kubectl apply -f -
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-distributed-demo
-  namespace: dynamo
+  name: vllm-kv-demo
+  namespace: ${NAMESPACE}
 spec:
   services:
     Frontend:
-      dynamoNamespace: vllm-distributed-demo
+      dynamoNamespace: vllm-kv-demo
       componentType: frontend
       replicas: 1
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:${RELEASE_VERSION}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              python3 -m dynamo.frontend \\
+                --http-port 8000 \\
+                --router-mode kv \\
+                --kv-overlap-score-weight 1.0
+          env:
+            - name: NATS_SERVER
+              value: "nats://nats.nats-system:4222"
+            - name: DYN_LOG
+              value: info
     VllmWorker:
       envFromSecret: hf-token-secret
-      dynamoNamespace: vllm-distributed-demo
+      dynamoNamespace: vllm-kv-demo
       componentType: worker
       replicas: 2
       resources:
@@ -460,6 +478,8 @@ spec:
       envs:
         - name: DYN_LOG
           value: info
+        - name: NATS_SERVER
+          value: "nats://nats.nats-system:4222"
       extraPodSpec:
         volumes:
         - name: local-model-cache
@@ -467,7 +487,7 @@ spec:
             path: /data/huggingface-cache
             type: DirectoryOrCreate
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.0
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:${RELEASE_VERSION}
           securityContext:
             capabilities:
               add:
@@ -480,34 +500,47 @@ spec:
             - /bin/sh
             - -c
           args:
-            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1
+            - python3 -m dynamo.vllm --model Qwen/Qwen2.5-1.5B-Instruct --tensor-parallel-size 1 --enable-prefix-caching
 EOF
 
 echo ""
-echo "✓ Distributed Dynamo deployment created"
-echo "  Deployment: vllm-distributed-demo"
-echo "  Workers: 2 (data parallelism with KV cache sharing via NIXL)"
+echo "✓ Data-parallel deployment created with KV-aware routing"
+echo "  Deployment: vllm-kv-demo"
+echo "  Workers: 2 (identical, data parallel)"
+echo "  Router Mode: kv (cache-aware)"
+echo "  NATS: nats://nats.nats-system:4222"
 ```
+
+**Key Configuration Flags:**
+
+**Frontend:**
+- `--router-mode kv`: Enables KV-aware routing
+- `--kv-overlap-score-weight 1.0`: Balances cache hits vs load distribution
+- `NATS_SERVER`: Connection to NATS for subscribing to cache events
+
+**Workers:**
+- `--enable-prefix-caching`: Enables cache block tracking and event publishing
+- `NATS_SERVER`: Where to publish cache events
+- `--tensor-parallel-size 1`: Each worker uses 1 GPU (not splitting model)
 
 ### Step 2: Create NodePort Service
 
-Expose the frontend for testing:
-
 ```bash
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Create NodePort service
-cat <<'EOF' | kubectl apply -f -
+cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Service
 metadata:
-  name: vllm-distributed-demo-frontend-np
-  namespace: dynamo
+  name: vllm-kv-frontend-np
+  namespace: ${NAMESPACE}
 spec:
   type: NodePort
   selector:
     nvidia.com/dynamo-component: Frontend
-    nvidia.com/dynamo-graph-deployment-name: vllm-distributed-demo
+    nvidia.com/dynamo-graph-deployment-name: vllm-kv-demo
   ports:
   - port: 8000
     targetPort: 8000
@@ -518,14 +551,14 @@ EOF
 
 echo ""
 echo "✓ NodePort service created on port 30200"
-echo "  Access at: http://$NODE_IP:30200"
+echo "  Access at: http://\${NODE_IP}:30200"
 ```
 
 ### Step 3: Wait for Deployment
 
 ```bash
 # Wait for pods to be ready
-echo "Waiting for distributed Dynamo deployment..."
+echo "Waiting for deployment..."
 echo "This may take 2-3 minutes for model download and initialization..."
 echo ""
 
@@ -533,18 +566,21 @@ export NAMESPACE=${NAMESPACE:-dynamo}
 
 # Wait for pods to be ready
 kubectl wait --for=condition=ready --timeout=300s \
-  pods -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo \
+  pods -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo \
   -n $NAMESPACE 2>/dev/null || echo "Pods are initializing..."
 
 echo ""
 echo "Deployment status:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-distributed-demo
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
 
 echo ""
-echo "✓ Distributed Dynamo deployment ready"
+echo "Expected pods:"
+echo "  - vllm-kv-demo-frontend-xxxxx (Frontend with KV-aware router)"
+echo "  - vllm-kv-demo-vllmworker-xxxxx (Worker 1)"
+echo "  - vllm-kv-demo-vllmworker-xxxxx (Worker 2)"
 ```
 
-### Step 4: Test Inference
+### Step 4: Test Basic Inference
 
 ```bash
 # Test the deployment
@@ -555,19 +591,19 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-1.5B-Instruct",
-    "messages": [{"role": "user", "content": "Explain distributed inference in one sentence"}],
+    "messages": [{"role": "user", "content": "What is AI?"}],
     "max_tokens": 50
-  }' | python3 -m json.tool
+  }' | jq -r '.choices[0].message.content'
 
 echo ""
-echo "✓ Distributed Dynamo deployment is serving requests"
-echo "  Multiple workers coordinated via K8s-native discovery"
-echo "  NIXL handles KV cache data transfer between workers"
+echo "✓ Deployment is serving requests"
+echo "  Router: KV-aware (tracking cache state)"
+echo "  Workers: Publishing cache events to NATS"
 ```
 
 ---
 
-## Section 4: Monitoring Distributed Components
+## Section 5: Demonstrate Cache-Aware Routing
 
 ### Step 1: Access Dynamo Metrics in Grafana
 
