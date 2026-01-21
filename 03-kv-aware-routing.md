@@ -192,9 +192,9 @@ echo "  - Service: nats (ClusterIP, port 4222)"
 ```bash
 # Quick connectivity test
 kubectl run -it --rm nats-test --image=natsio/nats-box:latest --restart=Never -- \
-  nats-sub -s nats://nats.nats-system:4222 test
+  nats sub -s nats://nats.nats-system:4222 test
 
-# If successful, you'll see "Subscribing on test"
+# If successful, you'll see "Listening on [test]"
 # Press Ctrl+C to exit
 ```
 
