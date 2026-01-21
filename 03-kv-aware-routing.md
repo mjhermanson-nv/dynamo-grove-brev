@@ -594,88 +594,7 @@ echo "  System prompt tokens (cached): ~20 tokens"
 echo "  Only the user questions needed to be processed fresh"
 ```
 
----
-
-## Section 6: Understanding KV-Aware Routing Trade-offs
-
-### K8s-Native vs NATS/etcd Comparison (v0.8.0+)
-
-| Aspect | K8s-Native | NATS/etcd |
-|--------|------------|-----------|
-| **Setup Complexity** | ✅ Simple (no extra infra) | ⚠️ Complex (2 systems to manage) |
-| **Latency** | ✅ Lower (direct TCP) | ⚠️ Slightly higher (pub/sub) |
-| **Scale Sweet Spot** | Most deployments | Extreme scale |
-| **Discovery** | EndpointSlices (built-in) | etcd (external) |
-| **Transport** | TCP | NATS + TCP |
-| **Ops Burden** | ✅ Low | ⚠️ Medium-High |
-| **Multi-Region** | ⚠️ Limited | ✅ Excellent |
-| **Custom Routing** | ⚠️ Basic | ✅ Advanced |
-| **Cache Coordination** | ✅ Yes (via planner) | ✅ Yes (via NATS) |
-| **NIXL Support** | ✅ Yes | ✅ Yes |
-
-**Recommendation:** Start with K8s-native. Only add NATS/etcd if you need extreme scale or multi-region capabilities.
-
-### Single-Node vs Multi-Node
-
-**Single Node with Multiple GPUs (Typical Dev Setup)**:
-```
-✓ KV-aware routing still beneficial (routes to worker with cached data)
-✓ Learning opportunity to understand architecture
-✓ Workers can share cache blocks via NIXL locally
-✓ K8s-native = simpler (no NATS/etcd overhead)
-✗ Less dramatic network benefits (same machine)
-```
-
-**Multi-Node (Production)**:
-```
-✓ KV-aware Router directs requests to nodes with relevant cache
-✓ NIXL transfers cache data efficiently (RDMA/TCP between nodes)
-✓ Improved cache hit rates = lower latency
-✓ Better resource utilization across cluster
-✓ K8s-native recommended for most deployments
-✓ NATS/etcd for extreme scale or multi-region
-```
-✓ Enables advanced features (cache migration, load balancing)
-✗ Network latency between nodes
-✗ Increased complexity in debugging
-```
-
-### Performance Characteristics
-
-```bash
-# Display KV-aware routing characteristics
-cat <<'EOF'
-
-KV-Aware Routing Benefits:
-
-When KV-Aware Routing Helps Most:
-  • Multiple GPUs or nodes with high traffic
-  • Repeated queries with shared prefixes (high cache hit potential)
-  • Long context lengths (expensive to recompute prefills)
-  • Batch processing workloads with similar prompts
-  • Chatbots and conversational AI (repeated system prompts)
-
-When It May Not Help:
-  • Single worker deployments (no routing decisions to make)
-  • Completely unique queries every time (low cache hit rate)
-  • Very short context lengths (cache overhead > savings)
-  • Real-time streaming with entirely unique prompts
-
-Architecture Notes:
-  • KV-Aware Routing = Router tracks cache state and makes placement decisions
-  • NATS = Cache event coordination (workers publish, router subscribes)
-  • Data Parallel = Multiple identical workers, each handles full inference
-  • Local KV Cache = Each worker stores its own cache (no transfer between workers)
-EOF
-```
-
----
-
-## Section 6: Advanced Distributed Features
-
-### Cache Monitoring
-
-Check distributed coordination through worker logs:
+### Step 4: Check Worker Logs for Cache Activity
 
 ```bash
 # Get cache stats from worker logs
@@ -702,11 +621,15 @@ else
 fi
 ```
 
-**Note**: Cache hit/miss metrics depend on workload patterns. Even on a single node with multiple GPUs, KV-aware routing can improve cache hits by directing requests to the worker that already has relevant cache blocks.
+**What to observe:**
+- Prefix cache hit/miss rates in worker logs
+- NATS connection status (should be connected)
+- Cache block allocation and reuse patterns
+- Router routing requests to the same worker for similar prefixes
 
 ---
 
-## Section 7: Cleanup
+## Section 6: Cleanup
 
 ### Step 1: Remove KV-Aware Routing Deployment
 
