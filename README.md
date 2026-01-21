@@ -128,17 +128,6 @@ Grafana is exposed via NodePort on the cluster. The notebooks will show you how 
 - **Check logs with kubectl**: Essential for troubleshooting deployment issues
 - **Monitor resource usage**: Keep an eye on GPU memory and CPU utilization
 
-## 🤝 Contributing
-
-Contributions are welcome! To maintain consistency:
-
-1. Edit the `.md` files (not `.ipynb`)
-2. Run `./resources/sync-notebooks.sh` to update notebooks
-3. Test your changes in Jupyter
-4. Submit a pull request
-
-See `resources/NOTEBOOK-WORKFLOW.md` for development guidelines.
-
 ## 📄 License
 
 These guides are provided as-is for learning and deploying Dynamo on Kubernetes.
