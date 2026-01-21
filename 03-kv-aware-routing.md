@@ -205,12 +205,18 @@ echo "  - Service: nats (ClusterIP, port 4222)"
 ### Step 4: Test NATS Connectivity (Optional)
 
 ```bash
-# Quick connectivity test (publishes a test message)
-kubectl run --rm nats-test --image=natsio/nats-box:latest --restart=Never -- \
-  nats pub -s nats://nats.nats-system:4222 test "Hello from NATS test"
+# Quick connectivity test using the NATS pod
+echo "Testing NATS connectivity..."
+kubectl exec -n nats-system nats-0 -- \
+  nats pub test "Hello from NATS test"
 
-# If successful, you'll see "Published [test] : 'Hello from NATS test'"
-echo "✓ NATS is reachable and accepting connections"
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✓ NATS is reachable and accepting connections"
+else
+    echo ""
+    echo "⚠️ NATS connectivity test failed"
+fi
 ```
 
 ---
@@ -549,26 +555,44 @@ echo "  Requests 2-3 should be faster (cache hits with KV-aware routing)"
 - Request 1: Slower TTFT (Time To First Token) - no cached blocks
 - Requests 2 & 3: Faster TTFT - router directs to worker with cached prefix "Explain quantum computing"
 
-### Step 2: Check Worker Logs for Cache Activity
+### Step 2: Check Cache Behavior
+
+**Note**: vLLM's detailed cache logs (hit/miss rates) are only visible at DEBUG level, which is very verbose. At INFO level, you'll see NATS connection and endpoint registration, but not individual cache hits.
+
+**Option A: Check NATS Events (Recommended)**
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
 
-# Get worker pod names  
-WORKER_PODS=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[*].metadata.name}')
+# Check NATS for KV cache events being published
+echo "Checking NATS for KV cache event stream..."
+kubectl exec -n nats-system nats-0 -- nats stream ls 2>/dev/null || \
+    echo "Note: JetStream streams are created on first request"
 
-echo "Checking worker logs for cache events..."
-for POD in $WORKER_PODS; do
-    echo ""
-    echo "=== Worker: $POD ==="
-    kubectl logs -n $NAMESPACE $POD --tail=30 | grep -E "(prefix.*cache|kv.*cache|blocks)" || echo "No cache messages in recent logs"
-done
+echo ""
+echo "After sending requests above, workers publish KV events to NATS"
+echo "The router uses these events to route requests to workers with cached prefixes"
 ```
 
-**What to look for:**
-- "Prefix cache hit" messages
-- Block allocation/reuse statistics
-- Most requests should hit the same worker (indicated by same pod having activity)
+**Option B: Enable Verbose Logging (Optional - Very Verbose)**
+
+If you want to see detailed cache hit/miss logs, you can patch the deployment:
+
+```bash
+# This will make logs VERY verbose - only use for debugging
+kubectl set env deployment/vllm-kv-demo-vllmworker \
+  -n $NAMESPACE \
+  VLLM_LOGGING_LEVEL=DEBUG
+
+echo "⚠️ Verbose logging enabled - logs will be very detailed"
+echo "To revert: kubectl set env deployment/vllm-kv-demo-vllmworker -n $NAMESPACE VLLM_LOGGING_LEVEL=INFO"
+```
+
+**What indicates KV-aware routing is working:**
+- NATS connection successful (shown in startup logs)
+- Requests with similar prefixes complete faster (TTFT improvement)
+- Worker logs show `Registering endpoint` messages (NATS connectivity)
+- At DEBUG level: "GPU KV cache usage" and block allocation messages
 
 ### Step 3: Conversation-Style Traffic (System Prompt Reuse)
 
@@ -613,38 +637,46 @@ echo "  System prompt tokens (cached): ~20 tokens"
 echo "  Only the user questions needed to be processed fresh"
 ```
 
-### Step 4: Check Worker Logs for Cache Activity
+### Step 4: Verify KV-Aware Routing is Working
 
 ```bash
-# Get cache stats from worker logs
 export NAMESPACE=${NAMESPACE:-dynamo}
 
+echo "=== Verifying KV-Aware Routing Setup ==="
+echo ""
+
+# Check NATS connectivity from workers
+echo "1. NATS Connection Status:"
 WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    echo "Checking cache activity in worker logs..."
+    kubectl logs -n $NAMESPACE $WORKER_POD --tail=50 | grep -E "(NATS|nats)" | tail -3
     echo ""
-    kubectl logs -n $NAMESPACE $WORKER_POD --tail=100 | grep -i "cache\|prefix" | tail -10
-    
-    echo ""
-    echo "Worker pod: $WORKER_POD"
-    echo ""
-    echo "What to look for:"
-    echo "  - Prefix cache hits/misses"
-    echo "  - KV cache block creation events"
-    echo "  - Cache eviction messages"
-    echo "  - NATS connection status"
 else
     echo "⚠️ No worker pods found"
-    echo "Make sure the vllm-kv-demo deployment is running"
 fi
+
+echo "2. KV-Aware Router Configuration:"
+FRONTEND_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+if [ -n "$FRONTEND_POD" ]; then
+    kubectl logs -n $NAMESPACE $FRONTEND_POD --tail=50 | grep -E "(router.*mode|kv.*overlap)" | tail -3
+    echo ""
+else
+    echo "⚠️ No frontend pod found"
+fi
+
+echo "3. Performance Indicator:"
+echo "   Run the same prompt 2-3 times and compare TTFT (Time To First Token)"
+echo "   Second+ requests should be noticeably faster with cache hits"
 ```
 
-**What to observe:**
-- Prefix cache hit/miss rates in worker logs
-- NATS connection status (should be connected)
-- Cache block allocation and reuse patterns
-- Router routing requests to the same worker for similar prefixes
+**How to confirm KV-aware routing is working:**
+
+1. **NATS connected**: Worker logs show successful NATS connection and endpoint registration
+2. **Router in KV mode**: Frontend logs show `router_mode: kv` and KV overlap scoring
+3. **Faster subsequent requests**: Requests with shared prefixes complete faster (visible via `time curl` or benchmark tools)
+4. **Same worker handling similar requests**: Using verbose logging (DEBUG level), you can see the same worker pod handling requests with shared prefixes
 
 ---
 
