@@ -723,53 +723,55 @@ Send many concurrent requests or very long sequences to saturate one worker. Und
 
 This proves KV-aware routing is working! The router intelligently tracks which worker has which prefixes cached and directs requests accordingly, maximizing cache reuse and GPU efficiency.
 
-### Step 3: Verify Deployment Status
+### Optional: Experiment with Load Testing
+
+Want to see how KV-aware routing handles concurrent load? Use AI-Perf to send multiple requests:
+
+**Install AI-Perf** (if not already installed):
+```bash
+pip install aiperf
+```
+
+**Run benchmarks** (in a terminal, not in notebook - can be resource intensive):
 
 ```bash
-export NAMESPACE=${NAMESPACE:-dynamo}
+# Get your endpoint
+export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export FRONTEND_URL="http://$NODE_IP:30200"
 
-echo "=== KV-Aware Routing Deployment Status ==="
-echo ""
+# Low concurrency baseline (1 concurrent request, 100 total)
+aiperf profile \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --url $FRONTEND_URL \
+  --endpoint-type chat \
+  --streaming \
+  --concurrency 1 \
+  --request-count 100
 
-# Check pod status
-echo "1. Pod Status:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
-echo ""
+# High concurrency (4 concurrent requests, 200 total)
+# This is where you'll see multi-worker distribution!
+aiperf profile \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --url $FRONTEND_URL \
+  --endpoint-type chat \
+  --streaming \
+  --concurrency 4 \
+  --request-count 200
 
-# Check worker startup logs (shows NATS environment variable)
-echo "2. Worker Configuration (from pod env):"
-WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-
-if [ -n "$WORKER_POD" ]; then
-    echo "Worker: $WORKER_POD"
-    kubectl get pod -n $NAMESPACE $WORKER_POD -o jsonpath='{.spec.containers[0].env[?(@.name=="NATS_SERVER")]}' | jq -r '"\(.name)=\(.value)"' 2>/dev/null || echo "NATS_SERVER environment variable set"
-    echo ""
-else
-    echo "⚠️ No worker pods found"
-    echo ""
-fi
-
-# Check frontend configuration
-echo "3. Frontend Configuration (from pod env):"
-FRONTEND_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-
-if [ -n "$FRONTEND_POD" ]; then
-    echo "Frontend: $FRONTEND_POD"
-    kubectl get pod -n $NAMESPACE $FRONTEND_POD -o jsonpath='{.spec.containers[0].env[?(@.name=="NATS_SERVER")]}' | jq -r '"\(.name)=\(.value)"' 2>/dev/null || echo "NATS_SERVER environment variable set"
-    kubectl get pod -n $NAMESPACE $FRONTEND_POD -o jsonpath='{.spec.containers[0].args[0]}' | grep -o "router-mode kv" || echo "Note: Check deployment YAML for router-mode kv"
-    echo ""
-else
-    echo "⚠️ No frontend pod found"
-    echo ""
-fi
-
-echo "✓ Verification complete"
-echo ""
-echo "KV-aware routing is working if:"
-echo "  - All pods are Running (1/1)"
-echo "  - NATS_SERVER is configured (nats://nats.nats-system:4222)"
-echo "  - Frontend has --router-mode kv in args"
+# Sustained request rate (10 requests/sec, 200 total)
+aiperf profile \
+  --model Qwen/Qwen2.5-1.5B-Instruct \
+  --url $FRONTEND_URL \
+  --endpoint-type chat \
+  --streaming \
+  --request-rate 10 \
+  --request-count 200
 ```
+
+**What to observe:**
+- TTFT (Time To First Token) - lower is better
+- Request throughput - higher concurrency should utilize both workers
+- At high concurrency, check frontend logs to see requests distributed across both workers
 
 ---
 
@@ -785,8 +787,8 @@ You've deployed KV-aware routing with data-parallel workers, where the router in
 - Works on single nodes with multiple GPUs or across multi-node clusters
 
 **Key architectural choice:**
-- Use **disaggregated serving** (Lab 1) for predictable latency on individual requests
-- Use **distributed serving** (Lab 3) when you have high traffic with cache-friendly patterns
+- Use **disaggregated serving** (Lab 1) for predictable latency with separate prefill/decode
+- Use **KV-aware routing** (Lab 3) when you have high traffic with cache-friendly patterns (system prompts, document contexts)
 
 **Next steps:** Experiment with different worker counts, or monitor cache hit rates in Grafana.
 
