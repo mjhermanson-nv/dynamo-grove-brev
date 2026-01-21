@@ -60,7 +60,6 @@ dynamo-grove-brev/
 ├── 01-dynamo-deployment-guide.md/.ipynb      # Guide 1: Deployment
 ├── 02-monitoring-and-observability.md/.ipynb # Guide 2: Monitoring
 ├── 03-kv-aware-routing.md/.ipynb             # Guide 3: KV-Aware Routing
-├── oneshot.sh                                # Bootstrap script
 ├── resources/                                # Supporting files
 │   ├── run-benchmark.sh                      # AI-Perf benchmark wrapper
 │   ├── dynamo-inference-dashboard.json       # Grafana dashboard (Dynamo metrics)
