@@ -216,10 +216,30 @@ grafana:
 EOF
 
 echo "Installing kube-prometheus-stack..."
-helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-    -n monitoring \
-    -f /tmp/kube-prometheus-stack-values.yaml \
-    --wait
+MAX_RETRIES=3
+RETRY_COUNT=0
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+        -n monitoring \
+        -f /tmp/kube-prometheus-stack-values.yaml \
+        --wait \
+        --timeout 10m; then
+        echo "✓ kube-prometheus-stack installed successfully"
+        break
+    else
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo "⚠️  Helm install failed (attempt $RETRY_COUNT/$MAX_RETRIES), retrying in 10 seconds..."
+            sleep 10
+        else
+            echo "❌ Helm install failed after $MAX_RETRIES attempts"
+            echo "   You can retry manually with:"
+            echo "   helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack -n monitoring -f /tmp/kube-prometheus-stack-values.yaml --wait --timeout 10m"
+            exit 1
+        fi
+    fi
+done
 
 echo "Provisioning Grafana dashboards..."
 kubectl apply -n monitoring -f - <<'EOF'

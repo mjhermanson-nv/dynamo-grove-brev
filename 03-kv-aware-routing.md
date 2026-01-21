@@ -793,9 +793,21 @@ aiperf profile \
 
 #### What to Observe
 
-- TTFT (Time To First Token) - lower is better
-- Request throughput - higher concurrency should utilize both workers
-- At high concurrency, check frontend logs to see requests distributed across both workers
+- **TTFT (Time To First Token)** - lower is better
+- **Request throughput** - higher concurrency should utilize both workers
+- **Router decision logs** - Check frontend logs to see KV-aware routing in action:
+
+```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+kubectl logs -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend --tail=50 | grep "scheduler"
+```
+
+Look for lines showing:
+- `Formula for worker_id=... with 1 cached blocks: 1.438` (cache hit - lower score)
+- `Formula for worker_id=... with 0 cached blocks: 2.438` (cache miss - higher score)
+- `Selected worker: worker_id=... cached blocks: 1` (router chose worker with cache)
+
+The router prefers workers with lower "logit" scores, and cached blocks reduce the score, so workers with cached prefixes get selected!
 
 #### Troubleshooting
 
