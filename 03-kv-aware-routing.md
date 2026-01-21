@@ -781,10 +781,7 @@ echo "  curl http://$NODE_IP:30100/v1/models"
 - **Grove Operator Guide**: https://docs.nvidia.com/dynamo/latest/kubernetes/grove.html
 - **Dynamo v0.8.0 Release Notes**: https://github.com/ai-dynamo/dynamo/releases/tag/v0.8.0
 
-### Advanced Topics (NATS/etcd - Optional)
 
-- **NATS Documentation**: https://docs.nats.io/
-- **etcd Documentation**: https://etcd.io/docs/
 
 ### Community Resources
 
