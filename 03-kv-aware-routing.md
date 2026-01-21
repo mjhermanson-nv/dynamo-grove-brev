@@ -229,7 +229,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 ## Pre-Deployment: Check GPU Availability
 
-**⚠️ CRITICAL**: Lab 3 requires GPUs for data-parallel workers. Before proceeding, verify you have sufficient GPU resources available.
 
 ### Step 1: Check Current GPU Usage
 
@@ -250,14 +249,14 @@ echo "GPU requests by namespace:"
 kubectl get pods -A -o json | jq -r '.items | group_by(.metadata.namespace) | .[] | "\(.[0].metadata.namespace): \([.[] | .spec.containers[].resources.limits."nvidia.com/gpu" // "0"] | add) GPU(s)"' | grep -v ": 0 GPU"
 ```
 
-### Step 2: Clean Up Lab 1 Deployment (If Still Running)
+### Step 2: Delete Lab 1 Deployment (If Still Running)
 
-**⚠️ WARNING**: If Lab 1 deployment is still running, you MUST delete it first to free GPUs for Lab 3.
+**⚠️ WARNING**: If the Lab 1 model deployment is still running, you MUST delete it first to free GPUs for Lab 3.
 
-Lab 3 deployment requires:
+Lab 3 requires:
 - **2 GPUs** for 2 data-parallel workers (1 GPU each)
 
-If you have only 2 GPUs total and Lab 1 is using them, run this cleanup:
+If you have only 2 GPUs total and Lab 1's deployment is using them, delete it:
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
@@ -281,7 +280,7 @@ fi
 
 ### Step 3: Verify GPUs Are Available
 
-After cleaning up Lab 1 (if needed), verify GPUs are free:
+After deleting Lab 1's deployment (if needed), verify GPUs are free:
 
 ```bash
 echo "=== Final GPU Check ==="
