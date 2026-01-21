@@ -583,33 +583,26 @@ For this workshop with 2 GPUs and a 1.5B model, KV-aware routing is **working co
 
 ### Step 2: Visualize KV-Aware Routing in Action
 
-This script monitors the frontend's routing decisions in real-time, showing which worker handles each request and how many cached blocks are reused.
+This script sends requests and shows the frontend's routing decisions, including which worker handles each request and how many cached blocks are reused.
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
 export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
-# Get pod names
+# Get frontend pod name
 FRONTEND=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend -o jsonpath='{.items[0].metadata.name}')
-WORKER1=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker -o jsonpath='{.items[0].metadata.name}')
-WORKER2=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker -o jsonpath='{.items[1].metadata.name}')
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║         KV-Aware Routing Visualization                        ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 echo "Frontend: $FRONTEND"
-echo "Worker 1: $WORKER1"
-echo "Worker 2: $WORKER2"
 echo ""
 
-# Start monitoring frontend routing decisions
-kubectl logs -n $NAMESPACE $FRONTEND -f 2>/dev/null | \
-  grep "Selected worker" --line-buffered | \
-  awk '{print "[ROUTING] Worker:", $(NF-7), "| Cached blocks:", $(NF-5)}' &
-MONITOR_PID=$!
-
-sleep 2
+# Function to show latest routing decision from logs
+show_routing() {
+  echo "   [ROUTING] $(kubectl logs -n $NAMESPACE $FRONTEND --tail=20 | grep 'Selected worker' | tail -1 | sed 's/.*worker_id=/Worker: /; s/ dp_rank.*cached blocks:/ | Cached blocks:/; s/,.*//; s/ tree.*//')"
+}
 
 echo "════════════════════════════════════════════════════════════════"
 echo "Sending Test Requests"
@@ -626,13 +619,14 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
       {"role": "system", "content": "You are a physics tutor."},
       {"role": "user", "content": "What is gravity?"}
     ],
-    "max_tokens": 30
-  }' | jq -r '.choices[0].message.content | .[0:70]' 
+    "max_tokens": 20
+  }' | jq -r '.choices[0].message.content | .[0:50]'
 
-sleep 3
+sleep 1
+show_routing
+echo ""
 
 # Request 2 - Same physics prefix
-echo ""
 echo "📤 Request 2: Physics tutor + 'What is velocity?' (SAME PREFIX)"
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -642,13 +636,14 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
       {"role": "system", "content": "You are a physics tutor."},
       {"role": "user", "content": "What is velocity?"}
     ],
-    "max_tokens": 30
-  }' | jq -r '.choices[0].message.content | .[0:70]'
+    "max_tokens": 20
+  }' | jq -r '.choices[0].message.content | .[0:50]'
 
-sleep 3
+sleep 1
+show_routing
+echo ""
 
 # Request 3 - Different prefix
-echo ""
 echo "📤 Request 3: Math tutor + 'What is algebra?' (DIFFERENT PREFIX)"
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -658,13 +653,14 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
       {"role": "system", "content": "You are a math tutor."},
       {"role": "user", "content": "What is algebra?"}
     ],
-    "max_tokens": 30
-  }' | jq -r '.choices[0].message.content | .[0:70]'
+    "max_tokens": 20
+  }' | jq -r '.choices[0].message.content | .[0:50]'
 
-sleep 3
+sleep 1
+show_routing
+echo ""
 
 # Request 4 - Back to physics
-echo ""
 echo "📤 Request 4: Physics tutor + 'Explain momentum' (BACK TO PHYSICS)"
 curl -s http://$NODE_IP:30200/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -674,44 +670,46 @@ curl -s http://$NODE_IP:30200/v1/chat/completions \
       {"role": "system", "content": "You are a physics tutor."},
       {"role": "user", "content": "Explain momentum"}
     ],
-    "max_tokens": 30
-  }' | jq -r '.choices[0].message.content | .[0:70]'
+    "max_tokens": 20
+  }' | jq -r '.choices[0].message.content | .[0:50]'
 
-sleep 2
-kill $MONITOR_PID 2>/dev/null
-
+sleep 1
+show_routing
 echo ""
+
 echo "════════════════════════════════════════════════════════════════"
 echo "✓ Check the [ROUTING] lines above:"
-echo "  - Requests 1, 2, and 4 (physics) should use the same Worker ID"
-echo "  - Request 3 (math) may use a different Worker ID"
-echo "  - 'Cached blocks' shows prefix reuse (higher = more cache hits)"
+echo "  - Requests 1, 2, and 4 (physics) should use the SAME Worker ID"
+echo "  - Request 3 (math) may use a DIFFERENT Worker ID"
+echo "  - 'Cached blocks' increases when router reuses cached prefixes"
 echo "════════════════════════════════════════════════════════════════"
 ```
 
 **Understanding the Output:**
 
-Look for these key indicators in the `[ROUTING]` lines:
+You'll see `[ROUTING]` lines showing the routing decisions:
 
-1. **worker_id** - Unique identifier for each worker pod
-   - Same worker_id = request routed to same GPU
-   - Different worker_id = request routed to different GPU
-
-2. **cached blocks** - Number of KV cache blocks reused (**THE KEY METRIC!**)
-   - `cached blocks: 0` = No cache hit (cold start or different prefix)
-   - `cached blocks: N` (N > 0) = Cache hit! Router reused N blocks from memory
-
-3. **Routing pattern** - Requests with the same system prompt should route to the same worker
-
-**Example of successful KV-aware routing:**
 ```
-[ROUTING] Worker: 2575905244297037343 | Cached blocks: 0     ← First "physics" request
-[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Second "physics" request (CACHE HIT!)
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 0     ← First "physics" request  
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Second "physics" (CACHE HIT!)
 [ROUTING] Worker: 14409932740882684000 | Cached blocks: 0    ← "Math" request (different worker)
-[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Back to "physics" (same worker, cache hit!)
+[ROUTING] Worker: 2575905244297037343 | Cached blocks: 5     ← Back to "physics" (cache hit!)
 ```
 
-The router intelligently directs physics requests to worker `257590...` and math requests to worker `144099...`, maximizing cache reuse!
+**Key metrics:**
+- **Worker ID**: Unique identifier for each worker pod
+  - Same ID = same GPU = request routed to worker with cached data
+  - Different ID = different GPU = new worker, no cache available
+  
+- **Cached blocks** (**THE KEY METRIC!**): Number of KV cache blocks reused
+  - `0` = Cache miss (first time seeing this prefix)
+  - `5+` = Cache hit! Router reused N blocks from worker's memory
+  
+- **Routing pattern**: Requests with same prefix → same worker → cache reuse
+  - Physics requests (1, 2, 4) → Worker `257590...` (consistent routing)
+  - Math request (3) → Worker `144099...` (different prefix, different worker)
+
+This proves KV-aware routing is working! The router intelligently tracks which worker has which prefixes cached and directs requests accordingly, maximizing cache reuse and GPU efficiency.
 
 ### Step 3: Verify Deployment Status
 
