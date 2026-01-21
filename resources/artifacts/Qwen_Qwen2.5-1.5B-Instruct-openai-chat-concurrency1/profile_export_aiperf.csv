@@ -1,9 +1,0 @@
-Metric,avg,min,max,p1,p5,p10,p25,p50,p75,p90,p95,p99,std
-Error Input Sequence Length (tokens),550.00,550.00,550.00,550.00,550.00,550.00,550.00,550.00,550.00,550.00,550.00,550.00,0.00
-
-Metric,Value
-Error Request Count,100.00
-Total Error Input Sequence Length (tokens),55000.00
-
-
-Endpoint,GPU_Index,GPU_Name,GPU_UUID,Metric,avg,min,max,p1,p5,p10,p25,p50,p75,p90,p95,p99,std
