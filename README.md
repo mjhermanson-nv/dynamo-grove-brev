@@ -23,7 +23,7 @@ Add monitoring to your Dynamo deployment using the cluster's built-in Prometheus
 ### 03 - KV-Aware Routing
 **File**: `03-kv-aware-routing.ipynb`
 
-Learn **KV-aware routing**, an intelligent load balancing feature that tracks which workers have cached data and routes requests accordingly. Deploy 2 identical workers (data parallelism) where the router monitors cache state via NATS and directs requests with similar prefixes to workers with matching cached blocks. This dramatically reduces time-to-first-token for chatbots, document Q&A, and any workload with repeated prompt patterns. Deploy NATS for cache coordination, configure the frontend with `--router-mode kv`, and demonstrate 5-10x faster responses for cache hits.
+Learn **KV-aware routing**, an intelligent load balancing feature that tracks which workers have cached data and routes requests accordingly. Deploy 2 identical workers (data parallelism) where the router monitors cache state via NATS and directs requests with similar prefixes to workers with matching cached blocks. This reduces time-to-first-token for chatbots, document Q&A, and any workload with repeated prompt patterns. Deploy NATS for cache coordination, configure the frontend with `--router-mode kv`, and demonstrate cache-aware routing benefits.
 
 **Duration**: ~60 minutes  
 **Note**: Requires NATS deployment for cache event coordination. Different from Lab 1's disaggregated architecture.

@@ -35,7 +35,7 @@ In this lab, you'll learn about **KV-aware routing**, an intelligent load balanc
 8. Worker 1 reuses cached prefill blocks → much faster TTFT!
 
 **Why This Matters:**
-When users ask variations of similar questions, the router intelligently directs requests to workers that have already cached related computations. This avoids redundant prefill work and can reduce TTFT by 50% or more for cache-friendly workloads.
+When users ask variations of similar questions, the router intelligently directs requests to workers that have already cached related computations. This avoids redundant prefill work and reduces time-to-first-token for cache-friendly workloads.
 
 **How this differs from Lab 1:**
 - **Lab 1**: Disaggregated serving (specialized prefill → decode workers)
@@ -190,32 +190,25 @@ worker1.process_request()
 
 **Without KV-Aware Routing (Round-Robin):**
 ```
-Request 1: "Explain AI" → Worker 1 (cache miss, slow TTFT)
-Request 2: "Explain AI in detail" → Worker 2 (cache miss, slow TTFT)
-Request 3: "Explain AI simply" → Worker 3 (cache miss, slow TTFT)
-Average TTFT: 500ms
+Request 1: "Explain AI" → Worker 1 (cache miss)
+Request 2: "Explain AI in detail" → Worker 2 (cache miss)
+Request 3: "Explain AI simply" → Worker 1 (cache miss)
+All requests experience full prefill computation
 ```
 
 **With KV-Aware Routing:**
 ```
-Request 1: "Explain AI" → Worker 1 (cache miss, slow TTFT: 500ms)
-Request 2: "Explain AI in detail" → Worker 1 (cache hit, fast TTFT: 50ms)
-Request 3: "Explain AI simply" → Worker 1 (cache hit, fast TTFT: 50ms)
-Average TTFT: 200ms (60% improvement!)
+Request 1: "Explain AI" → Worker 1 (cache miss)
+Request 2: "Explain AI in detail" → Worker 1 (cache hit - same worker)
+Request 3: "Explain AI simply" → Worker 1 (cache hit - same worker)
+Requests 2-3 reuse cached prefill computation from Request 1
 ```
-- In K8s-native mode: Routing metadata shared via API or direct communication
-- In NATS mode: NATS shares metadata about cache state
-- Enables intelligent request routing to workers with relevant cached data
-- Dramatically reduces prefill latency when cache hits occur
 
-**Optional NATS/etcd (for extreme scale)**: Advanced coordination:
-- **NATS**: Pub/sub messaging for metadata (cache events, routing tables)
-- **etcd**: Distributed configuration and service discovery
-- **When to use**: Very large clusters, multi-region, custom routing policies
-- **Note**: NATS does NOT transfer KV cache data (NIXL does that)
-- Router directs requests to workers with relevant cached prefixes
-- Improves cache hit rates even on single node with multiple GPUs
-- Workers transfer actual cache data via NIXL when needed
+**How NATS Enables This:**
+- Workers publish cache events to NATS when blocks are created/removed
+- Router subscribes to these events and maintains a global cache index
+- Router uses this index to select workers with matching cached prefixes
+- Result: Reduced prefill latency when cache hits occur
 
 ### Understanding Multi-GPU/Multi-Node Benefits
 
@@ -789,39 +782,29 @@ echo "  Only the user questions needed to be processed fresh"
 ### Performance Characteristics
 
 ```bash
-# Display performance comparison
+# Display KV-aware routing characteristics
 cat <<'EOF'
 
-Performance Impact of Distributed Dynamo:
+KV-Aware Routing Benefits:
 
-┌─────────────────────┬──────────────────┬──────────────┐
-│ Metric              │ Single Node      │ Multi-Node   │
-│                     │ (Multi-GPU)      │              │
-├─────────────────────┼──────────────────┼──────────────┤
-│ Cache Hit Rate      │ +10-20%          │ +20-40%      │
-│ Latency (P50)       │ +2-5ms           │ +2-5ms       │
-│ Latency (P99)       │ +5-10ms          │ +5-10ms      │
-│ Throughput          │ Same to +10%     │ +30-60%      │
-│ Memory Overhead     │ +100-200MB       │ +100-200MB   │
-└─────────────────────┴──────────────────┴──────────────┘
-
-When Distributed Dynamo Helps Most:
+When KV-Aware Routing Helps Most:
   • Multiple GPUs or nodes with high traffic
-  • Repeated queries (high cache hit potential)
-  • Long context lengths (expensive to recompute)
-  • Batch processing workloads
+  • Repeated queries with shared prefixes (high cache hit potential)
+  • Long context lengths (expensive to recompute prefills)
+  • Batch processing workloads with similar prompts
+  • Chatbots and conversational AI (repeated system prompts)
 
 When It May Not Help:
-  • Single GPU deployments
-  • Unique queries every time (low cache hit rate)
-  • Very short context lengths
-  • Real-time streaming with completely unique prompts
+  • Single worker deployments (no routing decisions to make)
+  • Completely unique queries every time (low cache hit rate)
+  • Very short context lengths (cache overhead > savings)
+  • Real-time streaming with entirely unique prompts
 
 Architecture Notes:
-  • Grove = Kubernetes Operator (orchestration)
-  • Dynamo = Serving Framework (actual inference)
-  • NATS = Metadata/coordination (small messages)
-  • NIXL = KV cache data transfer (large tensors via RDMA/TCP)
+  • KV-Aware Routing = Router tracks cache state and makes placement decisions
+  • NATS = Cache event coordination (workers publish, router subscribes)
+  • Data Parallel = Multiple identical workers, each handles full inference
+  • Local KV Cache = Each worker stores its own cache (no transfer between workers)
 EOF
 ```
 
