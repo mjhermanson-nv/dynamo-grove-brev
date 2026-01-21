@@ -205,18 +205,49 @@ echo "  - Service: nats (ClusterIP, port 4222)"
 ### Step 4: Test NATS Connectivity (Optional)
 
 ```bash
-# Quick connectivity test using the NATS pod
+# Quick connectivity test using nats-box
 echo "Testing NATS connectivity..."
-kubectl exec -n nats-system nats-0 -- \
-  nats pub test "Hello from NATS test"
+
+# Create a test Job
+kubectl apply -f - <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-test
+  namespace: nats-system
+spec:
+  ttlSecondsAfterFinished: 30
+  template:
+    spec:
+      containers:
+      - name: nats-box
+        image: natsio/nats-box:latest
+        command:
+        - nats
+        - pub
+        - -s
+        - nats://nats.nats-system:4222
+        - test
+        - "Hello from NATS test"
+      restartPolicy: Never
+  backoffLimit: 2
+EOF
+
+# Wait for job to complete
+echo "Waiting for test to complete..."
+kubectl wait --for=condition=complete --timeout=30s job/nats-test -n nats-system 2>/dev/null
 
 if [ $? -eq 0 ]; then
     echo ""
-    echo "✓ NATS is reachable and accepting connections"
+    echo "✓ NATS connectivity test successful"
+    echo "  Published test message to NATS server"
 else
     echo ""
-    echo "⚠️ NATS connectivity test failed"
+    echo "⚠️ NATS connectivity test failed or timed out"
+    kubectl logs -n nats-system job/nats-test 2>/dev/null
 fi
+
+# Cleanup will happen automatically after 30 seconds (ttlSecondsAfterFinished)
 ```
 
 ---
