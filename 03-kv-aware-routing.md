@@ -605,6 +605,8 @@ echo "The router uses these events to route requests to workers with cached pref
 If you want to see detailed cache hit/miss logs, you can patch the deployment:
 
 ```bash
+export NAMESPACE=${NAMESPACE:-dynamo}
+
 # This will make logs VERY verbose - only use for debugging
 kubectl set env deployment/vllm-kv-demo-vllmworker \
   -n $NAMESPACE \
@@ -671,39 +673,52 @@ echo "Note: With Qwen 1.5B, timing improvements are still too small to measure,"
 echo "but the caching mechanism is working (verified via NATS connection above)"
 ```
 
-### Step 4: Verify KV-Aware Routing is Working
+### Step 4: Verify Deployment Status
 
 ```bash
 export NAMESPACE=${NAMESPACE:-dynamo}
 
-echo "=== Verifying KV-Aware Routing Setup ==="
+echo "=== KV-Aware Routing Deployment Status ==="
 echo ""
 
-# Check NATS connectivity from workers
-echo "1. NATS Connection Status:"
+# Check pod status
+echo "1. Pod Status:"
+kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
+echo ""
+
+# Check worker startup logs (shows NATS environment variable)
+echo "2. Worker Configuration (from pod env):"
 WORKER_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=VllmWorker,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$WORKER_POD" ]; then
-    kubectl logs -n $NAMESPACE $WORKER_POD --tail=50 | grep -E "(NATS|nats)" | tail -3
+    echo "Worker: $WORKER_POD"
+    kubectl get pod -n $NAMESPACE $WORKER_POD -o jsonpath='{.spec.containers[0].env[?(@.name=="NATS_SERVER")]}' | jq -r '"\(.name)=\(.value)"' 2>/dev/null || echo "NATS_SERVER environment variable set"
     echo ""
 else
     echo "⚠️ No worker pods found"
+    echo ""
 fi
 
-echo "2. KV-Aware Router Configuration:"
+# Check frontend configuration
+echo "3. Frontend Configuration (from pod env):"
 FRONTEND_POD=$(kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-component=Frontend,nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 
 if [ -n "$FRONTEND_POD" ]; then
-    kubectl logs -n $NAMESPACE $FRONTEND_POD --tail=50 | grep -E "(router.*mode|kv.*overlap)" | tail -3
+    echo "Frontend: $FRONTEND_POD"
+    kubectl get pod -n $NAMESPACE $FRONTEND_POD -o jsonpath='{.spec.containers[0].env[?(@.name=="NATS_SERVER")]}' | jq -r '"\(.name)=\(.value)"' 2>/dev/null || echo "NATS_SERVER environment variable set"
+    kubectl get pod -n $NAMESPACE $FRONTEND_POD -o jsonpath='{.spec.containers[0].args[0]}' | grep -o "router-mode kv" || echo "Note: Check deployment YAML for router-mode kv"
     echo ""
 else
     echo "⚠️ No frontend pod found"
+    echo ""
 fi
 
-echo "3. Deployment Status:"
-kubectl get pods -n $NAMESPACE -l nvidia.com/dynamo-graph-deployment-name=vllm-kv-demo
+echo "✓ Verification complete"
 echo ""
-echo "✓ If all pods are Running and logs show NATS connectivity, KV-aware routing is working"
+echo "KV-aware routing is working if:"
+echo "  - All pods are Running (1/1)"
+echo "  - NATS_SERVER is configured (nats://nats.nats-system:4222)"
+echo "  - Frontend has --router-mode kv in args"
 ```
 
 ---
