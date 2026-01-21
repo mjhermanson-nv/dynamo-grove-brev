@@ -265,14 +265,18 @@ echo "Checking for Lab 1 deployment..."
 if kubectl get dynamographdeployment vllm-disagg-router -n $NAMESPACE &>/dev/null; then
     echo ""
     echo "⚠️  Lab 1 deployment (vllm-disagg-router) is still running!"
-    echo "   This deployment is using GPUs needed for Lab 3."
+    echo "   Deleting it to free GPUs for Lab 3..."
     echo ""
-    echo "Delete Lab 1 deployment? (you can redeploy it later)"
+    
+    # Delete the deployment
+    kubectl delete dynamographdeployment vllm-disagg-router -n $NAMESPACE
+    kubectl delete svc vllm-frontend-nodeport -n $NAMESPACE 2>/dev/null || true
+    
     echo ""
-    echo "Run: kubectl delete dynamographdeployment vllm-disagg-router -n $NAMESPACE"
-    echo "     kubectl delete svc vllm-frontend-nodeport -n $NAMESPACE"
-    echo ""
-    echo "Or press Ctrl+C to keep Lab 1 running (Lab 3 will fail if insufficient GPUs)"
+    echo "✓ Lab 1 deployment deleted - waiting for pods to terminate..."
+    kubectl wait --for=delete pod -l nvidia.com/dynamo-graph-deployment-name=vllm-disagg-router -n $NAMESPACE --timeout=60s 2>/dev/null || true
+    
+    echo "✓ GPUs freed for Lab 3"
 else
     echo "✓ Lab 1 deployment not found - GPUs should be available"
 fi
